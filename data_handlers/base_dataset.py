@@ -11,6 +11,10 @@ def extract_data(file_path):
                     continue
                 if obj['data']['questions'][i]['answer'] == '':
                     continue
+                if obj['data']['passage']['title'] is not None:
+                    prompt = f"{obj['data']['passage']['title']}\n{obj['data']['passage']['text']}"
+                else:
+                    prompt = f"{obj['data']['passage']['text']}"
                 data_list.append(
                     {
                         "id": obj['id'],
@@ -18,9 +22,8 @@ def extract_data(file_path):
                         "time": obj['time'],
                         "labeler": obj['labeler'],
                         "is_topic_based_summarization": obj["is_topic_based_summarization"],
-                        "prompt": f"{obj['data']['passage']['title']}\n"
-                                  f"{obj['data']['passage']['text']}",
-                        "question": f"Question: {obj['data']['questions'][i]['question']}\n"
+                        "prompt": prompt,
+                        "response": f"Question: {obj['data']['questions'][i]['question']}\n\n"
                                     f"Answer: {obj['data']['questions'][i]['answer']}"
                     }
                 )

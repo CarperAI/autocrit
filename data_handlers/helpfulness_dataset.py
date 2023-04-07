@@ -10,6 +10,10 @@ def extract_helpful_and_rm_data(data_path):
             for item in obj['data']['questions']:
                 if item['question'] == '':
                     continue
+                if obj['data']['passage']['title'] is not None:
+                    start = f"{obj['data']['passage']['title']}\n{obj['data']['passage']['text']}\n\n"
+                else:
+                    start = f"{obj['data']['passage']['text']}\n\n"
                 if item['is_critiqueable'] is not None:
                     if not item['is_critiqueable']:
                         continue
@@ -23,11 +27,11 @@ def extract_helpful_and_rm_data(data_path):
                                 "time": obj['time'],
                                 "labeler": obj['labeler'],
                                 "is_topic_based_summarization": obj["is_topic_based_summarization"],
-                                "prompt": f"{obj['data']['passage']['title']}\n"
-                                          f"{obj['data']['passage']['text']}\n"
-                                          f"Question: {item['question']}\n"
-                                          f"Answer: {item['answers'][0]['answer']}\n"
-                                          f"Critique: {item['new_critique']['text']}\n",
+                                "prompt": f"{start}"
+                                          f"Question: {item['question']}\n\n"
+                                          f"Answer: {item['answers'][0]['answer']}\n\n"
+                                          f"Critiqueable: Yes\n\n"
+                                          f"Critique: {item['new_critique']['text']}",
                                 "helpful": True
                             }
                         )
@@ -39,11 +43,11 @@ def extract_helpful_and_rm_data(data_path):
                                 "time": obj['time'],
                                 "labeler": obj['labeler'],
                                 "is_topic_based_summarization": obj["is_topic_based_summarization"],
-                                "prompt": f"{obj['data']['passage']['title']}\n"
-                                          f"{obj['data']['passage']['text']}\n"
-                                          f"Question: {item['question']}\n"
+                                "prompt": f"{start}"
+                                          f"Question: {item['question']}\n\n"
                                           f"Answer: {item['answers'][0]['answer']}",
-                                "response": f"Critique: {item['new_critique']['text']}"
+                                "response": f"Critiqueable: Yes\n\n"
+                                            f"Critique: {item['new_critique']['text']}"
                             }
                         )
                     for feedback in item['answers'][i]['critiques']:
@@ -55,11 +59,11 @@ def extract_helpful_and_rm_data(data_path):
                                 "time": obj['time'],
                                 "labeler": obj['labeler'],
                                 "is_topic_based_summarization": obj["is_topic_based_summarization"],
-                                "prompt": f"{obj['data']['passage']['title']}\n"
-                                          f"{obj['data']['passage']['text']}\n"
-                                          f"Question: {item['question']}\n"
-                                          f"Answer: {item['answers'][i]['answer']}\n"
-                                          f"Critique: {feedback['critique']}\n",
+                                "prompt": f"{start}"
+                                          f"Question: {item['question']}\n\n"
+                                          f"Answer: {item['answers'][i]['answer']}\n\n"
+                                          f"Critiqueable: Yes\n\n"
+                                          f"Critique: {feedback['critique']}",
                                 "helpful": feedback['feedback']['helpful']
                             }
                         )
@@ -75,11 +79,11 @@ def extract_helpful_and_rm_data(data_path):
                                 "time": obj['time'],
                                 "labeler": obj['labeler'],
                                 "is_topic_based_summarization": obj["is_topic_based_summarization"],
-                                "prompt": f"{obj['data']['passage']['title']}\n"
-                                          f"{obj['data']['passage']['text']}\n"
-                                          f"Question: {item['question']}\n"
+                                "prompt": f"{start}"
+                                          f"Question: {item['question']}\n\n"
                                           f"Answer: {item['answers'][i]['answer']}",
-                                "response": f"Critique: {feedback['critique']}"
+                                "response": f"Critiqueable: Yes\n\n"
+                                            f"Critique: {feedback['critique']}"
                             }
                         )
     return data_list, rm_data_list
