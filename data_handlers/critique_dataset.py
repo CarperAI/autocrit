@@ -1,4 +1,4 @@
-from datasets import Dataset
+from datasets import Dataset, DatasetDict
 import jsonlines
 
 def extract_data(file_path):
@@ -98,6 +98,8 @@ def extract_data(file_path):
                                             f"Refinement: {critique['refinement']}"
                             }
                         )
+                if len(set(item['rankings'])) == 1:
+                    continue
                 crit_rm_data_list.append(
                     {
                         "id": obj['id'],
@@ -108,7 +110,7 @@ def extract_data(file_path):
                         "is_topic_based_summarization": obj["is_topic_based_summarization"],
                         "prompt": f"{start}"
                                   f"Question: {item['question']}",
-                        "answers": [item['answers'][j]
+                        "answers": [item['answers'][j]['answer']
                                     for j in range(len(item['answers']))],
                         "rankings": item['rankings']
                     }
@@ -119,12 +121,8 @@ def extract_data(file_path):
 if __name__ == '__main__':
     train_crit, train_ref, train_crit_ref, train_rm_data = extract_data(r"train.jsonl(1)\train.jsonl")
     test_crit, test_ref, test_crit_ref, test_rm_data = extract_data(r"test.jsonl(1)\test.jsonl")
-    Dataset.from_list(test_crit).push_to_hub("self-critiquing-critique-test")
-    Dataset.from_list(test_ref).push_to_hub("self-critiquing-refine-test")
-    Dataset.from_list(test_crit_ref).push_to_hub("self-critiquing-critique-and-refine-test")
-    Dataset.from_list(test_rm_data).push_to_hub("self-critiquing-critique-answer-ranking-test")
-    Dataset.from_list(train_crit).push_to_hub("self-critiquing-critique-train")
-    Dataset.from_list(train_ref).push_to_hub("self-critiquing-refine-train")
-    Dataset.from_list(train_crit_ref).push_to_hub("self-critiquing-critique-and-refine-train")
-    Dataset.from_list(train_rm_data).push_to_hub("self-critiquing-critique-answer-ranking-train")
+    DatasetDict({"train": Dataset.from_list(train_crit), "test":  Dataset.from_list(test_crit)}).push_to_hub("self-critiquing-critique")
+    DatasetDict({"train": Dataset.from_list(train_ref), "test":  Dataset.from_list(test_ref)}).push_to_hub("self-critiquing-refine")
+    DatasetDict({"train": Dataset.from_list(train_crit_ref), "test":  Dataset.from_list(test_crit_ref)}).push_to_hub("self-critiquing-critique-and-refine")
+    DatasetDict({"train": Dataset.from_list(train_rm_data), "test":  Dataset.from_list(test_rm_data)}).push_to_hub("self-critiquing-critique-answer-ranking")
     

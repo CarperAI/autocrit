@@ -1,4 +1,4 @@
-from datasets import Dataset
+from datasets import Dataset, DatasetDict
 import jsonlines
 
 
@@ -33,5 +33,4 @@ def extract_data(file_path):
 if __name__ == '__main__':
     train_data = extract_data(r"train.jsonl\train.jsonl")
     test_data = extract_data(r"test.jsonl\test.jsonl")
-    Dataset.from_list(train_data).push_to_hub("self-critiquing-base-train")
-    Dataset.from_list(test_data).push_to_hub("self-critiquing-base-test")
+    DatasetDict({"train": Dataset.from_list(train_data), "test":  Dataset.from_list(test_data)}).push_to_hub("self-critiquing-base")

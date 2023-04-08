@@ -1,4 +1,4 @@
-from datasets import Dataset
+from datasets import Dataset, splits, DatasetDict
 import jsonlines
 
 
@@ -92,7 +92,6 @@ def extract_helpful_and_rm_data(data_path):
 if __name__ == '__main__':
     train_sft_data, train_rm_data = extract_helpful_and_rm_data(r"train.jsonl(2)\train.jsonl")
     test_sft_data, test_rm_data = extract_helpful_and_rm_data(r"test.jsonl(2)\test.jsonl")
-    Dataset.from_list(train_sft_data).push_to_hub("self-critiquing-helpful-sft-train")
-    Dataset.from_list(train_rm_data).push_to_hub("self-critiquing-helpful-rate-train")
-    Dataset.from_list(test_sft_data).push_to_hub("self-critiquing-helpful-sft-test")
-    Dataset.from_list(test_rm_data).push_to_hub("self-critiquing-helpful-rate-test")
+    DatasetDict({"train": Dataset.from_list(train_rm_data), "test":  Dataset.from_list(test_rm_data)}).push_to_hub("self-critiquing-helpful-rate")
+    DatasetDict({"train": Dataset.from_list(train_sft_data), "test":  Dataset.from_list(test_sft_data)}).push_to_hub("self-critiquing-helpful-sft")
+
