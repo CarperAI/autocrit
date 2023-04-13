@@ -90,6 +90,9 @@ def extract_helpful_and_rm_data(data_path):
 
 
 if __name__ == '__main__':
+    # From https://arxiv.org/abs/2206.05802 helpfulness task
+    # train.jsonl from https://openaipublic.blob.core.windows.net/critiques/dataset/helpfulness/train.jsonl.gz
+    # test.jsonl from https://openaipublic.blob.core.windows.net/critiques/dataset/helpfulness/test.jsonl.gz
     train_sft_data, train_rm_data = extract_helpful_and_rm_data(r"train.jsonl(2)\train.jsonl")
     test_sft_data, test_rm_data = extract_helpful_and_rm_data(r"test.jsonl(2)\test.jsonl")
     DatasetDict({"train": Dataset.from_list(train_rm_data), "test":  Dataset.from_list(test_rm_data)}).push_to_hub("self-critiquing-helpful-rate")

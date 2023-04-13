@@ -119,6 +119,9 @@ def extract_data(file_path):
                 
 
 if __name__ == '__main__':
+    # From https://arxiv.org/abs/2206.05802 critique task
+    # train.jsonl from https://openaipublic.blob.core.windows.net/critiques/dataset/critiques/train.jsonl.gz
+    # test.jsonl from https://openaipublic.blob.core.windows.net/critiques/dataset/critiques/test.jsonl.gz
     train_crit, train_ref, train_crit_ref, train_rm_data = extract_data(r"train.jsonl(1)\train.jsonl")
     test_crit, test_ref, test_crit_ref, test_rm_data = extract_data(r"test.jsonl(1)\test.jsonl")
     DatasetDict({"train": Dataset.from_list(train_crit), "test":  Dataset.from_list(test_crit)}).push_to_hub("self-critiquing-critique")
