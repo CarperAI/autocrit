@@ -4,10 +4,10 @@ from torch import nn
 import functools
 from deepspeed.utils.zero_to_fp32 import load_state_dict_from_zero_checkpoint
 import os
-from reward_models import RewardModel
 import torch
 import json
 
+from tclx.model.reward_models import RewardModel
 
 def load_yaml(config_path):
     with open(config_path, "r") as f:
