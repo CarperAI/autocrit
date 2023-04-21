@@ -102,6 +102,12 @@ def make_rm(model_name, type_t, tok_path, save_model):
     return reward_model
 
 
+def load_rm(model_name, tokenizer_name, model_path, save_model):
+    rm = make_rm(model_name, "causal", tokenizer_name, save_model)
+    rm.load_state_dict(torch.load(model_path), strict=True)
+    return rm
+
+
 def upload_model():
     model_path = "../ckpts/gpt2-sft/"
     model = AutoModelForCausalLM.from_pretrained(model_path)
