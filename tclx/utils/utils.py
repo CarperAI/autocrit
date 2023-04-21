@@ -108,18 +108,7 @@ def load_rm(model_name, tokenizer_name, model_path, save_model):
     return rm
 
 
-def upload_model():
-    model_path = "../ckpts/gpt2-sft/"
-    model = AutoModelForCausalLM.from_pretrained(model_path)
-    model.push_to_hub(repo_url="https://huggingface.co/Dahoas/gpt2-sft-single-context")
-
-
-def convert_deepspeed_checkpoint(is_rm=True):
-    model_name = "EleutherAI/gpt-j-6B" # "Dahoas/pythia-6B-static-sft"
-    tok_name = "EleutherAI/gpt-j-6B" #"EleutherAI/gpt-neox-20b"
-    model_path = "/mnt/nvme/home/alex/repos/rlhf/ckpts/gptj-rm-IHP"
-    model_ckpt = "checkpoint-10633"
-    type_t = "causal"
+def convert_deepspeed_checkpoint(model_name, tok_name, model_path, model_ckpt, is_rm=True, type_t="causal"):
     if is_rm:
         model = make_rm(model_name, type_t, tok_name, True)
     else:
@@ -132,8 +121,8 @@ def convert_deepspeed_checkpoint(is_rm=True):
     else:
         fp32_model.save_pretrained(os.path.join(model_path, "hf_ckpt"))
 
-def split_ckpt(num_chunks):
-    ckpt_path = "/fsx/alex/ckpts/gptneox-sft/hf_ckpt"
+
+def split_ckpt(ckpt_path, num_chunks):
     print("Splitting {} ...".format(ckpt_path))
     sd = torch.load(os.path.join(ckpt_path, "hf_ckpt.pt"))
     keys = list(sd.keys())
@@ -153,11 +142,10 @@ def split_ckpt(num_chunks):
         json.dump(index, f, indent=4)
     print("Done!")
 
-def hf_upload(make_repo=True):
+
+def hf_upload(converted_ckpt, repo_name, make_repo=True):
     import os
     from huggingface_hub import HfApi, create_repo
-    converted_ckpt = "/mnt/nvme/home/alex/repos/rlhf/ckpts/gptj-rm-IHP/hf_ckpt"
-    repo_name = "Dahoas/gptj-rm-IHP"
     if make_repo:
         create_repo(repo_name, repo_type="model", private=False)
 
