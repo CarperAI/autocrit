@@ -43,32 +43,35 @@ class SampleCallback(TrainerCallback):
 
 
 def train(config):
+    config.update({"eval_accumulation_steps": 2, "fp16_full_eval": True})
     tokenizer = AutoTokenizer.from_pretrained(config["tokenizer_path"])
     tokenizer.pad_token = tokenizer.eos_token
-    config.update({"eval_accumulation_steps": 2, "fp16_full_eval": True})
     training_args = TrainingArguments(**config["train_args"])
     model = AutoModelForCausalLM.from_pretrained(config["model_path"])
     model.tok = tokenizer
     model.cuda()
 
     data = load_dataset(config["data_path"])["train"]
-    val_size = int(len(data) * 0.02)
-    val_data = data.select([i for i in range(val_size)])
-    data = data.select([val_size + i for i in range(len(data) - val_size)])
+    eval_size = int(len(data) * 0.02)
+    eval_data = data.select([i for i in range(eval_size)])
+    data = data.select([eval_size + i for i in range(len(data) - eval_size)])
     
+    if torch.distributed.get_rank() == 0:
+        wandb.init(project="tclx", config=config)
+
     print("Len data: ", len(data))
 
     if config["trainer"] == "unmasked":
         train_dataset = SFTDataset(data, tokenizer)
-        val_dataset = SFTDataset(val_data, tokenizer)
+        eval_dataset = SFTDataset(eval_data, tokenizer)
     elif config["trainer"] == "masked":
         train_dataset = MaskedSFTDataset(data, tokenizer)
-        val_dataset = MaskedSFTDataset(val_data, tokenizer)
+        eval_dataset = MaskedSFTDataset(eval_data, tokenizer)
     else:
         raise ValueError("{} is unsupported train type!".format(config["trainer"]))
 
     trainer = Trainer(model=model, args=training_args, train_dataset=train_dataset, callbacks=[SampleCallback],
-            eval_dataset=val_dataset, data_collator=lambda data: {'input_ids': torch.stack([f[0] for f in data]),
+            eval_dataset=eval_dataset, data_collator=lambda data: {'input_ids': torch.stack([f[0] for f in data]),
                                                                 'attention_mask': torch.stack([f[1] for f in data]),
                                                                 'labels': torch.stack([f[2] for f in data])})
     trainer.train()

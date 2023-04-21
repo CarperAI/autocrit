@@ -1,6 +1,8 @@
 from torch.utils.data import Dataset
 import torch
 from tqdm import tqdm
+import numpy as np
+
 
 # Anthropic fine-tunes language model on entire dialogue, not just responses
 class SFTDataset(Dataset):
@@ -76,87 +78,20 @@ class MaskedSFTDataset(Dataset):
             return self.input_ids[idx], self.attn_masks[idx], self.labels[idx], self.prompts[idx]
 
 
-class PairwiseDataset(Dataset):
-    def __init__(self, pairs, tokenizer, max_length, max_num=-1):
-        self.chosen_input_ids = []
-        self.chosen_attn_masks = []
-        self.rejected_input_ids = []
-        self.rejected_attn_masks = []
-        PAD_ID = tokenizer.pad_token
-
-        for i, pair in enumerate(tqdm(pairs)):
-            if max_num >= 0 and i > max_num:
-                break
-            prompt = pair["prompt"]
-            chosen, rejected = pair["chosen"], pair["rejected"]
-            tok_chosen = tokenizer(prompt + chosen + "<|endoftext|>", return_tensors="pt")["input_ids"]
-            tok_rejected = tokenizer(prompt + rejected + "<|endoftext|>", return_tensors="pt")["input_ids"]
-            # Reject data with num tokens > max_length
-            if tok_chosen.shape[-1] <= max_length and tok_rejected.shape[-1] <= max_length and chosen != rejected:
-                chosen_encodings_dict = tokenizer(prompt + chosen + '<|endoftext|>', truncation=True,
-                                        max_length=max_length, padding="max_length", return_tensors="pt")
-                rejected_encodings_dict = tokenizer(prompt + rejected + '<|endoftext|>', truncation=True,
-                                        max_length=max_length, padding="max_length", return_tensors="pt")
-                self.chosen_input_ids.append(chosen_encodings_dict['input_ids'])
-                self.chosen_attn_masks.append(chosen_encodings_dict['attention_mask'])
-                self.rejected_input_ids.append(rejected_encodings_dict['input_ids'])
-                self.rejected_attn_masks.append(rejected_encodings_dict['attention_mask'])
-
-    def __len__(self):
-        return len(self.chosen_input_ids)
-
-    def __getitem__(self, idx):
-        return self.chosen_input_ids[idx], self.chosen_attn_masks[idx], self.rejected_input_ids[idx], self.rejected_attn_masks[idx]
-
-
-class PairwiseEvalDataset(Dataset):
-    def __init__(self, pairs, tokenizer, max_length):
-        self.input_ids = []
-        self.attn_masks = []
-
-        for pair in tqdm(pairs):
-            prompt = pair["prompt"]
-            chosen, rejected = pair["chosen"], pair["rejected"]
-            tok_chosen = tokenizer(prompt + chosen + "<|endoftext|>", return_tensors="pt")["input_ids"]
-            tok_rejected = tokenizer(prompt + rejected + "<|endoftext|>", return_tensors="pt")["input_ids"]
-            # Reject data with num tokens > max_length
-            if tok_chosen.shape[-1] <= max_length and tok_rejected.shape[-1] <= max_length:
-                chosen_encodings_dict = tokenizer(prompt + chosen + '<|endoftext|>', truncation=True,
-                                        max_length=max_length, padding="max_length", return_tensors="pt")
-                rejected_encodings_dict = tokenizer(prompt + rejected + '<|endoftext|>', truncation=True,
-                                        max_length=max_length, padding="max_length", return_tensors="pt")
-                # First append chosen then rejected
-                self.input_ids.append(chosen_encodings_dict['input_ids'])
-                self.attn_masks.append(chosen_encodings_dict['attention_mask'])
-                self.input_ids.append(rejected_encodings_dict['input_ids'])
-                self.attn_masks.append(rejected_encodings_dict['attention_mask'])
-
-    def __len__(self):
-        return len(self.input_ids)
-
-    def __getitem__(self, idx):
-        return self.input_ids[idx], self.attn_masks[idx]
-
-
 class RankedDataset(Dataset):
-    def __init__(self, rankings, tokenizer, max_length, order=["instruct", "20B", "6B", "1B", "125M"], max_num=-1):
+    def __init__(self, rankings, tokenizer, max_length, order=["chosen", "rejected"], max_num=-1):
         self.rankings_input_ids = []
         self.rankings_attn_masks = []
+        tokenizer.truncation_side="left"
         PAD_ID = tokenizer.pad_token
 
         for i, ranks in enumerate(tqdm(rankings)):
             if max_num >= 0 and i > max_num:
                 break
             prompt = ranks.pop("prompt")
-            toks = []
-            long = False
-            for response in ranks.values():
-                long = long or len(tokenizer(prompt + response + "<|endoftext|>", return_tensors="pt")["input_ids"]) > max_length
-            if long:
-                continue
-            # Reject data with num tokens > max_length
             ranking_input_ids = []
             ranking_attn_masks = []
+            # Stack responses from most preferred to least preferred
             for model in order:
                 response = ranks[model]
                 encodings_dict = tokenizer(prompt + response + '<|endoftext|>', truncation=True, max_length=max_length, padding="max_length", return_tensors="pt")
@@ -206,17 +141,6 @@ class RankedEvalDataset(Dataset):
 
     def __getitem__(self, idx):
         return self.rankings_input_ids[idx], self.rankings_attn_masks[idx], None
-
-
-def pairwise_data_collator(data):
-    if len(data[0]) == 4:
-        return {'input_ids': torch.cat([f[0] for f in data] + [f[2] for f in data]),
-                'attention_mask': torch.cat([f[1] for f in data] + [f[3] for f in data])}
-    elif len(data[0]) == 2:
-        return {'input_ids': torch.cat([f[0] for f in data]),
-                'attention_mask': torch.cat([f[1] for f in data])}
-    else:
-        raise ValueError("Invalid data format")
 
 
 def ranked_data_collator(data):

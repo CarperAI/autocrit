@@ -29,7 +29,6 @@ class RewardModel(nn.Module):
     def gradient_checkpointing_enable(self):
         self.model.gradient_checkpointing_enable()
 
-
     def forward(
         self,
         input_ids=None,
