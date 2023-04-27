@@ -3,6 +3,8 @@ To convert a casual language model to triton inference server format:
 python convert_to_triton.py --model EleutherAI/gpt-j-6B
 ```
 
+To use an API client, see [client.py](./client.py)
+
 To start a server using Docker:
 `./start_server.sh`
 

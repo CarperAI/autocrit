@@ -46,28 +46,28 @@ class InferModel(nn.Module):
         super().__init__()
         self.traced_model = traced_model
 
-    @torch.inference_mode()
     def forward(
         self,
         input_ids: torch.Tensor,
         tensor_of_seq_len: torch.Tensor,
         temperature: torch.Tensor,
     ):
-        for _ in range(tensor_of_seq_len.shape[1] - 1):
-            logits = self.traced_model(input_ids)
+        with torch.no_grad():
+            for _ in range(tensor_of_seq_len.shape[1] - 1):
+                logits = self.traced_model(input_ids).float()
+                next_token = torch.multinomial(
+                    torch.softmax(logits[:, -1, :] / temperature, dim=-1), 1
+                ).squeeze(1)
+                input_ids = torch.cat([input_ids, next_token.unsqueeze(1)], dim=1)
+
+            # in TorchScript, the above logits var lifetime doesn't escape the loop's scope
+            logits = self.traced_model(input_ids).float()
             next_token = torch.multinomial(
                 torch.softmax(logits[:, -1, :] / temperature, dim=-1), 1
             ).squeeze(1)
             input_ids = torch.cat([input_ids, next_token.unsqueeze(1)], dim=1)
 
-        # in TorchScript, the above logits var lifetime doesn't escape the loop's scope
-        logits = self.traced_model(input_ids).float()
-        next_token = torch.multinomial(
-            torch.softmax(logits[:, -1, :] / temperature, dim=-1), 1
-        ).squeeze(1)
-        input_ids = torch.cat([input_ids, next_token.unsqueeze(1)], dim=1)
-
-        return input_ids.int(), logits
+            return input_ids.int(), logits
 
 
 print(f"Converting {args.model} to TorchScript...")

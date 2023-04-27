@@ -68,7 +68,7 @@ if __name__ == "__main__":
                 input_ids = torch.tensor(
                     tokenizer.encode(prompt, return_tensors="pt")
                 ).unsqueeze(0)
-                logits, output_ids = await infer(
+                last_logits, output_ids = await infer(
                     triton_client, args.model, input_ids, new_tokens=128, temperature=1.0
                 )
                 print(tokenizer.decode(output_ids[0]))
