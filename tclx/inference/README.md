@@ -1,10 +1,11 @@
 To convert a casual language model to triton inference server format:
 ```bash
-python convert_to_triton.py --model EleutherAI/gpt-j-6B
+python convert_to_triton.py --model gpt2
 ```
 
-To use an API client, see [client.py](./client.py)
-Running `python client.py` will run a inference REPL
+To use an API client, see [client.py](./client.py).
+
+Running `python client.py --url ip-26-0-130-12:8001` will run a inference REPL
 
 To start a server using Docker:
 `./start_server.sh`
@@ -16,3 +17,5 @@ or run the [example sbatch](./triton.sbatch)
 ```
 sbatch triton.sbatch
 ```
+
+Use `ip-hostname-of-node:8001` as the url 

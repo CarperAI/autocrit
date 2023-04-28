@@ -65,7 +65,7 @@ if __name__ == "__main__":
         async with Client(args.url) as triton_client:
             while True:
                 prompt = input("Prompt: ")
-                input_ids = torch.tensor(tokenizer.encode(prompt, return_tensors="pt"))
+                input_ids = tokenizer.encode(prompt, return_tensors="pt")
                 last_logits, output_ids = await infer(
                     triton_client, args.model, input_ids, new_tokens=128, temperature=1.0
                 )
