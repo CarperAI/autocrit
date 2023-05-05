@@ -1,0 +1,25 @@
+fp16: true
+cuda: true
+gpus: 1
+seed: null
+deterministic: false
+top_p: 0.95
+temperature: 0.85
+gen_max_len: 256
+batch_size: 32
+logits_only: False
+num_return_sequences: 1
+model_name: "EleutherAI/pythia-410m-deduped"
+model_type: "hf"
+preamble: ""
+entity: person
+description: is politically liberal
+
+
+###################################################################################################
+# Hydra config overrides:
+hydra:
+    run:
+        dir: logs/autoeval/${hydra.job.override_dirname}
+    sweep:
+        dir: logs/autoeval/${hydra.job.override_dirname}
