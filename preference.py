@@ -15,8 +15,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--model_path", type=str, default="reciprocate/gpt2-tiny")
 parser.add_argument("--revision", type=str, default=None)
 parser.add_argument("--dataset", type=str, default="reciprocate/number-pairs")
-parser.add_argument("--lr", default=1e-3, type=float)
-parser.add_argument("--batch_size", default=10, type=int)
+parser.add_argument("--lr", default=6e-4, type=float)
+parser.add_argument("--batch_size", default=20, type=int)
 parser.add_argument("--seq_length", default=1024, type=int)
 parser.add_argument("--eval_interval", default=10, type=int)
 parser.add_argument("--checkpoint_dir", default="checkpoints", type=str)
@@ -45,6 +45,7 @@ def plot_calibration(model_name: str, dataset_name: str, delta_scores: np.ndarra
         "font.size": 15,
         "text.color": textcolor,
         "axes.labelcolor": textcolor,
+        "axes.labelpad": 12,
         "xtick.color": textcolor,
         "ytick.color": textcolor,
         "xtick.labelsize": 22,
@@ -52,13 +53,13 @@ def plot_calibration(model_name: str, dataset_name: str, delta_scores: np.ndarra
         "figure.titlesize": 14,
         "figure.figsize": (12, 8),
     })
-    pyplot.plot(space, perfect_calibration, label="Perfect calibration", c="grey")
+    pyplot.plot(space, perfect_calibration, label="perfect calibration", c="grey")
     pyplot.plot(space, probs, label=model_name)
 
     ax = pyplot.gca()
     ax.tick_params(top=False, labeltop=False, bottom=False, labelbottom=True, left=False, labelleft=True)
     ax.set_facecolor("#fff")
-    ax.set_title(f"Preference calibration on {dataset_name}", size=26, y=1.02, fontdict={"fontweight": "normal"})
+    ax.set_title(f"Calibration on {dataset_name}", size=26, y=1.02, fontdict={"fontweight": "normal"})
     ax.set_xlabel("Score difference", size=26)
     ax.set_ylabel("Accuracy", size=26)
     pyplot.legend(loc="best", fontsize=20, title_fontproperties={"weight": "normal", "style": "normal"}, fancybox=False, frameon=False)
@@ -92,8 +93,8 @@ if __name__ == "__main__":
     )
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_path)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
+    if tokenizer.pad_token is None or tokenizer.pad_token == tokenizer.eos_token:
+        tokenizer.add_special_tokens({"pad_token": "<PAD>"})
     tokenizer.padding_side = "right"
     tokenizer.truncation_side = "left"
 
@@ -102,9 +103,9 @@ if __name__ == "__main__":
         dataset = dataset.rename_column("chosen", "selected")
     accelerator.print(dataset)
 
-    def tokenize(prompt, chosen, rejected):
+    def tokenize(prompt, selected, rejected):
         return {
-            "selected_input_ids": tokenizer(prompt + chosen + tokenizer.eos_token, truncation=True, max_length=args.seq_length).input_ids,
+            "selected_input_ids": tokenizer(prompt + selected + tokenizer.eos_token, truncation=True, max_length=args.seq_length).input_ids,
             "rejected_input_ids": tokenizer(prompt + rejected + tokenizer.eos_token, truncation=True, max_length=args.seq_length).input_ids,
         }
 
@@ -127,11 +128,12 @@ if __name__ == "__main__":
     model = AutoModelForSequenceClassification.from_pretrained(args.model_path, revision=args.revision)
     model.config.num_labels = 1
     model.config.pad_token_id = tokenizer.pad_token_id
+    model.resize_token_embeddings(len(tokenizer))
 
     if args.only_eval:
         model, eval_dataloader = accelerator.prepare(model, eval_dataloader)
     else:
-        opt = torch.optim.AdamW(model.parameters(), lr=args.lr, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.01)
+        opt = torch.optim.AdamW(model.parameters(), lr=args.lr, betas=(0.9, 0.95), eps=1e-08, weight_decay=5e-3)
         model, opt, dataloader, eval_dataloader = accelerator.prepare(model, opt, dataloader, eval_dataloader)
 
     best_accuracy = 0
@@ -154,7 +156,7 @@ if __name__ == "__main__":
                         rejected_scores = model(batch["rejected_input_ids"], attention_mask=batch["rejected_attention_mask"])[0]
 
                     delta_scores = selected_scores - rejected_scores
-                    delta_scores, accelerator.gather_for_metrics(delta_scores.view(-1))
+                    delta_scores = accelerator.gather_for_metrics(delta_scores.view(-1))
 
                     all_delta_scores.extend(delta_scores.tolist())
                     all_scores.extend(torch.hstack((selected_scores, rejected_scores)).view(-1).tolist())
@@ -163,10 +165,9 @@ if __name__ == "__main__":
                     ntokens_batch = batch["selected_input_ids"].numel() + batch["rejected_input_ids"].numel()
                     ntokens += accelerator.reduce(torch.tensor(float(ntokens_batch), device=accelerator.device), "mean").item()
 
-                throughput = int(ntokens / (time() - start_time))
-
                 delta_scores = np.hstack(all_delta_scores)
                 accuracy = (delta_scores > 0).mean()
+                throughput = int(ntokens / (time() - start_time))
 
                 if accelerator.is_main_process:
                     image_path = plot_calibration(model_name, args.dataset, delta_scores)
@@ -183,16 +184,16 @@ if __name__ == "__main__":
                         "calibration": wandb.Image(image_path),
                     }, step=step)
 
-                if args.only_eval:
-                    exit()
-
                 if accuracy > best_accuracy:
                     best_accuracy = accuracy
                     accelerator.log({"best_accuracy": best_accuracy}, step=step)
 
-                    path = f"{model_name}@{args.dataset}%{best_accuracy}".replace("/", "_").replace(":", "_").replace("@", "_")
-                    model.save_pretrained(os.path.join(args.checkpoint_dir, path))
-                    tokenizer.save_pretrained(os.path.join(args.checkpoint_dir, path))
+                    if args.only_eval:
+                        exit()
+                    else:
+                        path = f"{model_name}@{args.dataset}%{best_accuracy}".replace("/", "_").replace(":", "_").replace("@", "_")
+                        model.save_pretrained(os.path.join(args.checkpoint_dir, path))
+                        tokenizer.save_pretrained(os.path.join(args.checkpoint_dir, path))
 
                 model.train()
 
