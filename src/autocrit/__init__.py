@@ -7,7 +7,7 @@ from autocrit.pipeline import (
     PersonaStatementChain,
 )
 
-__version__ = importlib_version("autoeval")
+__version__ = importlib_version("autocrit")
 
 __all__ = [
     "AgreementFilter",

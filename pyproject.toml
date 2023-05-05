@@ -28,7 +28,7 @@ add-ignore = "D10, D212"
 
 [tool.pytest.ini_options]
 minversion = "6.0"
-addopts = "-rA -x --doctest-modules --color=yes" # --cov=autoeval"  # Uncomment this for coverage by default
+addopts = "-rA -x --doctest-modules --color=yes" # --cov=autocrit"  # Uncomment this for coverage by default
 testpaths = ["tests"]
 doctest_optionflags = ["NORMALIZE_WHITESPACE", "IGNORE_EXCEPTION_DETAIL"]
 
