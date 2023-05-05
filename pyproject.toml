@@ -34,7 +34,7 @@ doctest_optionflags = ["NORMALIZE_WHITESPACE", "IGNORE_EXCEPTION_DETAIL"]
 
 [project]
 name = "autocrit"
-description = ""
+description = "A repo for transformer critique learning and generation"
 authors = [{name = "CarperAI"}]
 readme = "README.md"
 requires-python = ">=3.9"
