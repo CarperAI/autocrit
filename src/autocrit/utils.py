@@ -60,21 +60,21 @@ def truncate_code(completion: str, def_num=1, print_num=0, only_local_scope=Fals
 
 
 def model_setup(cfg: ModelConfig, device=None):
-    set_seed(cfg.seed, deterministic=True)
+    set_seed(cfg.seed)
+
     if device is None:
         device = torch.device("cuda")
-    use_fp16 = True
-    if not cfg.fp16 or device.type == "cpu":
-        use_fp16 = False
 
     tokenizer = AutoTokenizer.from_pretrained(cfg.model_name)
+    tokenizer.padding_side = "left"
     tokenizer.pad_token = tokenizer.eos_token
     if tokenizer.model_max_length > 32768:
         tokenizer.model_max_length = 2048
-    if use_fp16:
-        model = AutoModelForCausalLM.from_pretrained(
-            cfg.model_name, torch_dtype=torch.float16, low_cpu_mem_usage=True
-        ).to(device)
-    else:
-        model = AutoModelForCausalLM.from_pretrained(cfg.model_name).to(device)
+
+    model = AutoModelForCausalLM.from_pretrained(
+        cfg.model_name,
+        torch_dtype=torch.float16 if cfg.fp16 else None,
+        low_cpu_mem_usage=cfg.fp16,
+    ).to(device)
+
     return model, tokenizer, device
