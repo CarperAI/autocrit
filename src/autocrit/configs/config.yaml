@@ -20,6 +20,6 @@ description: is politically liberal
 # Hydra config overrides:
 hydra:
     run:
-        dir: logs/autocrit/${hydra.job.override_dirname}
+        dir: logs/autocrit/${hydra.job.override_dirname}/${now:%y-%m-%d_%H:%M}
     sweep:
-        dir: logs/autocrit/${hydra.job.override_dirname}
+        dir: logs/autocrit/${hydra.job.override_dirname}/${now:%y-%m-%d_%H:%M}
