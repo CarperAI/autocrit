@@ -9,7 +9,7 @@ from langchain.llms import OpenAI
 from langchain.llms.base import LLM
 from langchain.prompts import StringPromptTemplate
 from langchain.schema import Generation, LLMResult
-from pydantic import validator
+from pydantic import Extra, root_validator, validator
 from transformers import BatchEncoding
 
 from autocrit.configs import ModelConfig
@@ -95,14 +95,30 @@ Assistant: They would """
 
 class HuggingFaceLLM(LLM):
     config: ModelConfig
-    model: Any
-    tokenizer: Any
-    device: Any
+    model: Any = None
+    tokenizer: Any = None
+    device: Any = None
 
-    def __init__(self, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
+    class Config:
+        """Configuration for this pydantic object."""
+
+        extra = Extra.allow
+
+    @root_validator
+    def setup(cls, values: dict[str, Any]) -> dict[str, Any]:
+        """Validate the config."""
         os.environ["TOKENIZERS_PARALLELISM"] = "false"
-        self.model, self.tokenizer, self.device = model_setup(self.config)
+        if values["config"] is None:
+            raise ValueError("Config must be provided.")
+        if (
+            values["model"] is None
+            and values["tokenizer"] is None
+            and values["device"] is None
+        ):
+            values["model"], values["tokenizer"], values["device"] = model_setup(
+                values["config"]
+            )
+        return values
 
     @property
     def _llm_type(self) -> str:
