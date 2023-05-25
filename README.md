@@ -1,4 +1,4 @@
-# tclX
+# AutoCrit
 A repository for transformer critique learning and generation.
 
 ## Loading Reward Models
