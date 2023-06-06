@@ -112,10 +112,8 @@ if __name__ == '__main__':
     matches = 0
     total = 0
     for i, item in enumerate(data):
-        scores = [extract_rating(answer) for answer in item['answer']]
-        scores = [score for score in scores if score is not None]
-        mirrored_scores = [extract_rating(answer) for answer in item['mirrored_answer']]
-        mirrored_scores = [score for score in mirrored_scores if score is not None]
+        scores = [score for score in item['answer'] if score is not None]
+        mirrored_scores = [score for score in item['mirrored_answer'] if score is not None]
         correct = False
         if len(scores) == 0:
             print("No score for question {}".format(i))
