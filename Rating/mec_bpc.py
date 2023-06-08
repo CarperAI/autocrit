@@ -121,7 +121,6 @@ if __name__ == '__main__':
             print("No mirrored score for question {}".format(i))
         else:
             tot_score = (sum(scores) / len(scores)) - (sum(mirrored_scores) / len(mirrored_scores))
-``` from Max's review
             if tot_score < 0:
                 if 'CHATGPT' in human[i]:
                     correct = True
