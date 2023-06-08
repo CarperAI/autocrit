@@ -58,6 +58,20 @@ def extract_rating(rating):
 
 
 def mec_bpc(question, vicuna, gpt35, prompt_detail, num_evaluations=3):
+    """
+    Performs a MEC-BPC evaluation on a question, vicuna, and gpt35 continuation.
+    The return value is a list of the following format:
+    [question, vicuna, gpt35, prompt_detail['system_prompt'], [answer], [mirrored_answer]]
+    mirrored_answer should be multiplied by -1 and added to answer to get the final score.
+    example at the bottom to see how to use for evaluation.
+
+    :param question: Prompt used to generate a continuation
+    :param vicuna: Vicuna continuation
+    :param gpt35: ChatGPT continuation
+    :param prompt_detail: prompt details
+    :param num_evaluations: Number of evaluations to perform with guidance
+    :return: [question, vicuna, gpt35, prompt_detail['system_prompt'], [answer], [mirrored_answer]]
+    """
     system_text = "{{#system~}}\n" + prompt_detail['system_prompt'] + "\n{{~/system}}\n"
     program = guidance(system_text + """{{#user~}}
 [Question]
@@ -111,7 +125,7 @@ if __name__ == '__main__':
     print(human)
     matches = 0
     total = 0
-    for i, item in enumerate(data):
+    for i, item in enumerate(outputs):
         scores = [score for score in item['answer'] if score is not None]
         mirrored_scores = [score for score in item['mirrored_answer'] if score is not None]
         correct = False
@@ -120,7 +134,7 @@ if __name__ == '__main__':
         elif len(mirrored_scores) == 0:
             print("No mirrored score for question {}".format(i))
         else:
-            tot_score = (sum(scores) / len(scores)) + (sum(mirrored_scores) / len(mirrored_scores))
+            tot_score = (sum(scores) / len(scores)) - (sum(mirrored_scores) / len(mirrored_scores))
             if tot_score < 0:
                 if 'CHATGPT' in human[i]:
                     correct = True
