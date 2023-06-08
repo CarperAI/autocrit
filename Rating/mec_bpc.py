@@ -111,7 +111,7 @@ if __name__ == '__main__':
     print(human)
     matches = 0
     total = 0
-    for i, item in enumerate(data):
+    for i, item in enumerate(outputs):
         scores = [score for score in item['answer'] if score is not None]
         mirrored_scores = [score for score in item['mirrored_answer'] if score is not None]
         correct = False
