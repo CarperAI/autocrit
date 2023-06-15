@@ -1,26 +1,35 @@
-import os
 import torch
-import torch.nn.functional as F
-import numpy as np
-from huggingface_hub import list_repo_refs
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
-from datasets import load_dataset
-from accelerate import Accelerator
-from tqdm import tqdm
-from time import time
 import wandb
 import argparse
+import os
+import numpy as np
+from tqdm import tqdm
+from time import time
+import torch.nn.functional as F
+from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR
+from huggingface_hub import list_repo_refs
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from accelerate import Accelerator
+from datasets import load_dataset
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--model_path", type=str, default="reciprocate/gpt2-tiny")
-parser.add_argument("--revision", type=str, default=None)
-parser.add_argument("--dataset", type=str, default="reciprocate/number-pairs")
+parser.add_argument("--model_path", default="reciprocate/gpt2-tiny", type=str)
+parser.add_argument("--revision", default=None, type=str)
+parser.add_argument("--tokenizer_path", default=None, type=str)
+parser.add_argument("--dataset", default="reciprocate/number-pairs", type=str)
 parser.add_argument("--lr", default=6e-4, type=float)
+parser.add_argument("--min_lr", default=None, type=float)
+parser.add_argument("--weight_decay", default=0.1, type=float)
 parser.add_argument("--batch_size", default=20, type=int)
+parser.add_argument("--epochs", default=1, type=int)
 parser.add_argument("--seq_length", default=1024, type=int)
-parser.add_argument("--eval_interval", default=10, type=int)
+parser.add_argument("--num_unfrozen_layers", default=None, type=int)
+parser.add_argument("--downscale_weight", action="store_true")
 parser.add_argument("--checkpoint_dir", default="checkpoints", type=str)
+parser.add_argument("--eval_interval", default=100, type=int)
 parser.add_argument("--only_eval", action="store_true")
+parser.add_argument("--add_oasst_tokens", action="store_true")
+parser.add_argument("--calibration_datasets", default=[], nargs="+", type=str)
 args = parser.parse_args()
 
 
@@ -32,7 +41,11 @@ def plot_calibration(model_name: str, dataset_name: str, delta_scores: np.ndarra
     probs = []
     for center in space:
         ixs = (center - epsilon < abs(delta_scores)) & (abs(delta_scores) < center + epsilon)
-        prob = np.mean(delta_scores[ixs] > 0)
+        if not ixs.any():
+            prob = 0.5
+        else:
+            prob = np.mean(delta_scores[ixs] > 0)
+
         probs.append(prob)
 
     import matplotlib
@@ -92,119 +105,153 @@ if __name__ == "__main__":
         init_kwargs={"wandb": {"name": f"{model_name}@{args.dataset}"}},
     )
 
-    tokenizer = AutoTokenizer.from_pretrained(args.model_path)
-    if tokenizer.pad_token is None or tokenizer.pad_token == tokenizer.eos_token:
-        tokenizer.add_special_tokens({"pad_token": "<PAD>"})
+    tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_path or args.model_path)
+
+    if args.add_oasst_tokens:
+        tokenizer.add_tokens(["<|assistant|>", "<|prefix_begin|>", "<|prefix_end|>", "<|prompter|>", "<|system|>"])
+    tokenizer.add_special_tokens({"pad_token": "<|padding|>"})
     tokenizer.padding_side = "right"
     tokenizer.truncation_side = "left"
 
-    dataset = load_dataset(args.dataset)
-    if "chosen" in dataset["train"].column_names:
-        dataset = dataset.rename_column("chosen", "selected")
-    accelerator.print(dataset)
+    def to_vicuna_format(sample):
+        return {
+            "prompt": sample["prompt"].replace("\n\nHuman:", "USER:").replace("\n\nAssistant:", " ASSISTANT:")[4:],
+        }
 
-    def tokenize(prompt, selected, rejected):
+    def tokenize(prompt, selected, rejected, tokenizer):
         return {
             "selected_input_ids": tokenizer(prompt + selected + tokenizer.eos_token, truncation=True, max_length=args.seq_length).input_ids,
             "rejected_input_ids": tokenizer(prompt + rejected + tokenizer.eos_token, truncation=True, max_length=args.seq_length).input_ids,
         }
 
     def collate_fn(batch):
-        prefered = {"input_ids": [x["selected_input_ids"] for x in batch]}
-        rejected = {"input_ids": [x["rejected_input_ids"] for x in batch]}
-        prefered = tokenizer.pad(prefered, padding=True, return_tensors="pt")
-        rejected = tokenizer.pad(rejected, padding=True, return_tensors="pt")
-        return {
-            "selected_input_ids": prefered.input_ids,
-            "rejected_input_ids": rejected.input_ids,
-            "selected_attention_mask": prefered.attention_mask,
-            "rejected_attention_mask": rejected.attention_mask,
-        }
+        input_ids = sum([[x["rejected_input_ids"], x["selected_input_ids"]] for x in batch], [])
+        return tokenizer.pad({"input_ids": input_ids}, padding=True, return_tensors="pt")
 
-    tokenized = dataset.map(tokenize, input_columns=["prompt", "selected", "rejected"])
+    dataset = load_dataset(args.dataset)
+    if "chosen" in dataset["train"].column_names:
+        dataset = dataset.rename_column("chosen", "selected")
+    if "replies" in dataset["train"].column_names:
+        dataset = dataset.map(lambda x: {"selected": x["replies"][0], "rejected": x["replies"][1]}, remove_columns=["replies"])
+    accelerator.print(args.dataset, dataset)
+
+    eval_dataloaders = []
+    for name in args.calibration_datasets:
+        calibration_dataset = load_dataset(name)
+        if "test" in calibration_dataset:
+            calibration_dataset = calibration_dataset["test"]
+        else:
+            calibration_dataset = calibration_dataset["train"]
+
+        accelerator.print(name, calibration_dataset)
+        tokenized = calibration_dataset.map(tokenize, input_columns=["prompt", "selected", "rejected"], fn_kwargs=dict(tokenizer=tokenizer), desc="Tokenizing")
+        dataloader = torch.utils.data.DataLoader(tokenized, shuffle=False, batch_size=args.batch_size, collate_fn=collate_fn)
+        eval_dataloaders.append(dataloader)
+
+    tokenized = dataset.map(tokenize, input_columns=["prompt", "selected", "rejected"], fn_kwargs=dict(tokenizer=tokenizer), desc="Tokenizing")
     dataloader = torch.utils.data.DataLoader(tokenized["train"], shuffle=True, batch_size=args.batch_size, collate_fn=collate_fn)
-    eval_dataloader = torch.utils.data.DataLoader(tokenized["test"], shuffle=False, batch_size=args.batch_size, collate_fn=collate_fn)
+    eval_dataloaders.append(torch.utils.data.DataLoader(tokenized["test"], shuffle=False, batch_size=args.batch_size, collate_fn=collate_fn))
 
-    model = AutoModelForSequenceClassification.from_pretrained(args.model_path, revision=args.revision)
-    model.config.num_labels = 1
+    model = AutoModelForSequenceClassification.from_pretrained(args.model_path, revision=args.revision, num_labels=1)
     model.config.pad_token_id = tokenizer.pad_token_id
     model.resize_token_embeddings(len(tokenizer))
 
-    if args.only_eval:
-        model, eval_dataloader = accelerator.prepare(model, eval_dataloader)
-    else:
-        opt = torch.optim.AdamW(model.parameters(), lr=args.lr, betas=(0.9, 0.95), eps=1e-08, weight_decay=5e-3)
-        model, opt, dataloader, eval_dataloader = accelerator.prepare(model, opt, dataloader, eval_dataloader)
+    if args.downscale_weight:
+        model.score.weight.data *= 0.1
+
+    if args.num_unfrozen_layers is not None and args.num_unfrozen_layers > 0:
+        frozen = False
+
+        try:
+            for layer in model.transformer.h[:-args.num_unfrozen_layers]:
+                layer.requires_grad_(False)
+            frozen = True
+        except AttributeError:
+            pass
+
+        try:
+            for layer in model.model.layers[:-args.num_unfrozen_layers]:
+                layer.requires_grad_(False)
+            frozen = True
+        except AttributeError:
+            pass
+
+        if not frozen:
+            raise ValueError("Could not freeze layers, modify the code to support your architecture.")
 
     best_accuracy = 0
     step = 0
     eval_step = 0
-    epochs = 1
-    tbar = tqdm(range(epochs * len(dataloader)), disable=not accelerator.is_main_process or args.only_eval)
 
-    for _ in range(epochs):
+    if args.only_eval:
+        model, *eval_dataloaders = accelerator.prepare(model, *eval_dataloaders)
+    else:
+        opt = torch.optim.AdamW(model.parameters(), lr=args.lr, betas=(0.9, 0.95), eps=1e-08, weight_decay=args.weight_decay)
+
+        scheduler = CosineAnnealingLR(opt, T_max=len(dataloader) * args.epochs, eta_min=args.min_lr or args.lr)
+        model, opt, scheduler, dataloader, *eval_dataloaders, = accelerator.prepare(model, opt, scheduler, dataloader, *eval_dataloaders)
+
+    tbar = tqdm(range(args.epochs * len(dataloader)), disable=not accelerator.is_main_process or args.only_eval)
+    for iepoch in range(args.epochs):
         for batch in dataloader:
             if step % args.eval_interval == 0 or step == tbar.total - 1:
-                start_time = time()
-                ntokens = 0
-                model.eval()
-                all_scores, all_delta_scores, all_tokens = [], [], []
+                for dataset_name, eval_dataloader in zip(args.calibration_datasets + [args.dataset], eval_dataloaders):
+                    model.eval()
+                    all_scores, all_delta_scores, all_tokens = [], [], []
 
-                for batch in tqdm(eval_dataloader, desc="Evaluating"):
-                    with torch.no_grad():
-                        selected_scores = model(batch["selected_input_ids"], attention_mask=batch["selected_attention_mask"])[0]
-                        rejected_scores = model(batch["rejected_input_ids"], attention_mask=batch["rejected_attention_mask"])[0]
+                    for batch in tqdm(eval_dataloader, desc=f"Evaluating on {dataset_name}", disable=not accelerator.is_main_process, leave=False):
+                        with torch.no_grad():
+                            scores = model(**batch)[0]
 
-                    delta_scores = selected_scores - rejected_scores
-                    delta_scores = accelerator.gather_for_metrics(delta_scores.view(-1))
+                        delta_scores = scores.reshape(-1, 2).diff().view(-1)
+                        delta_scores = accelerator.gather_for_metrics(delta_scores)
+                        all_delta_scores.extend(delta_scores.tolist())
+                        all_scores.extend(scores.view(-1).tolist())
+                        all_tokens.extend(batch["input_ids"].tolist())
 
-                    all_delta_scores.extend(delta_scores.tolist())
-                    all_scores.extend(torch.hstack((selected_scores, rejected_scores)).view(-1).tolist())
-                    all_tokens.extend(sum(map(list, zip(batch["selected_input_ids"].tolist(), batch["rejected_input_ids"].tolist())), []))
+                    delta_scores = np.hstack(all_delta_scores)
+                    accuracy = (delta_scores > 0).mean()
 
-                    ntokens_batch = batch["selected_input_ids"].numel() + batch["rejected_input_ids"].numel()
-                    ntokens += accelerator.reduce(torch.tensor(float(ntokens_batch), device=accelerator.device), "mean").item()
+                    if accelerator.is_main_process:
+                        image_path = plot_calibration(model_name, dataset_name, delta_scores)
 
-                delta_scores = np.hstack(all_delta_scores)
-                accuracy = (delta_scores > 0).mean()
-                throughput = int(ntokens / (time() - start_time))
+                        texts = [text.replace(tokenizer.pad_token, "") for text in tokenizer.batch_decode(all_tokens)]
+                        samples = wandb.Table(["text", "score"], rows=list(zip(texts, all_scores))[:128])
 
-                if accelerator.is_main_process:
-                    image_path = plot_calibration(model_name, args.dataset, delta_scores)
+                        postfix = "" if dataset_name == args.dataset else f"@{dataset_name.split('/')[-1]}"
+                        accelerator.log({
+                            f"accuracy{postfix}": accuracy,
+                            f"samples{postfix}": samples,
+                            f"delta_scores{postfix}": delta_scores,
+                            f"calibration{postfix}": wandb.Image(image_path),
+                        }, step=step)
 
-                    texts = tokenizer.batch_decode(all_tokens, skip_special_tokens=True)
-                    samples = wandb.Table(["text", "score"], rows=list(zip(texts, all_scores))[:128])
+                    if accuracy > best_accuracy and dataset_name == args.dataset:
+                        best_accuracy = accuracy
+                        accelerator.log({"best_accuracy": best_accuracy}, step=step)
 
-                    tbar.set_postfix(accuracy=accuracy, throughput=throughput)
-                    accelerator.log({
-                        "accuracy": accuracy,
-                        "samples": samples,
-                        "delta_scores": delta_scores,
-                        "throughput_tokens": throughput,
-                        "calibration": wandb.Image(image_path),
-                    }, step=step)
+                        if args.only_eval:
+                            exit()
+                        else:
+                            path = f"{model_name}_{args.dataset}".replace("/", "_").replace(":", "_").replace("@", "_")
+                            model.save_pretrained(os.path.join(args.checkpoint_dir, path))
+                            if accelerator.is_main_process:
+                                tokenizer.save_pretrained(os.path.join(args.checkpoint_dir, path))
+                            accelerator.print(f"Checkpointing with {best_accuracy} -> {args.checkpoint_dir}")
 
-                if accuracy > best_accuracy:
-                    best_accuracy = accuracy
-                    accelerator.log({"best_accuracy": best_accuracy}, step=step)
+                    if dataset_name == args.dataset:
+                        tbar.set_postfix(accuracy=accuracy, best_accuracy=best_accuracy)
 
-                    if args.only_eval:
-                        exit()
-                    else:
-                        path = f"{model_name}@{args.dataset}%{best_accuracy}".replace("/", "_").replace(":", "_").replace("@", "_")
-                        model.save_pretrained(os.path.join(args.checkpoint_dir, path))
-                        tokenizer.save_pretrained(os.path.join(args.checkpoint_dir, path))
-
+                accelerator.wait_for_everyone()
                 model.train()
 
-            selected_scores = model(batch["selected_input_ids"], attention_mask=batch["selected_attention_mask"])[0]
-            rejected_scores = model(batch["rejected_input_ids"], attention_mask=batch["rejected_attention_mask"])[0]
-
-            loss = -F.logsigmoid(selected_scores - rejected_scores).mean()
+            scores = model(**batch)[0]
+            loss = -F.logsigmoid(scores.reshape(-1, 2).diff()).mean()
             accelerator.backward(loss)
             opt.step()
             opt.zero_grad()
+            scheduler.step()
             tbar.update()
-            tbar.set_description(f"loss: {loss.item():.4f}")
-            accelerator.log({"loss": loss.item()}, step=step)
+            tbar.set_description(f"Training {args.model_path} on {args.dataset}; loss: {loss.item():.4f}")
+            accelerator.log({"loss": loss.item(), "lr": float(scheduler.get_last_lr()[0])}, step=step)
             step += 1
