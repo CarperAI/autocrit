@@ -24,6 +24,8 @@ parser.add_argument("--batch_size", default=20, type=int)
 parser.add_argument("--epochs", default=1, type=int)
 parser.add_argument("--seq_length", default=1024, type=int)
 parser.add_argument("--num_unfrozen_layers", default=None, type=int)
+parser.add_argument("--gradient_checkpointing", action="store_true")
+parser.add_argument("--load_in_4bit", action="store_true")
 parser.add_argument("--downscale_weight", action="store_true")
 parser.add_argument("--checkpoint_dir", default="checkpoints", type=str)
 parser.add_argument("--eval_interval", default=100, type=int)
@@ -152,9 +154,12 @@ if __name__ == "__main__":
     dataloader = torch.utils.data.DataLoader(tokenized["train"], shuffle=True, batch_size=args.batch_size, collate_fn=collate_fn)
     eval_dataloaders.append(torch.utils.data.DataLoader(tokenized["test"], shuffle=False, batch_size=args.batch_size, collate_fn=collate_fn))
 
-    model = AutoModelForSequenceClassification.from_pretrained(args.model_path, revision=args.revision, num_labels=1)
+    model = AutoModelForSequenceClassification.from_pretrained(args.model_path, revision=args.revision, num_labels=1, load_in_4bit=args.load_in_4bit)
     model.config.pad_token_id = tokenizer.pad_token_id
     model.resize_token_embeddings(len(tokenizer))
+
+    if args.gradient_checkpointing:
+        model.gradient_checkpointing_enable()
 
     if args.downscale_weight:
         model.score.weight.data *= 0.1
@@ -179,10 +184,6 @@ if __name__ == "__main__":
         if not frozen:
             raise ValueError("Could not freeze layers, modify the code to support your architecture.")
 
-    best_accuracy = 0
-    step = 0
-    eval_step = 0
-
     if args.only_eval:
         model, *eval_dataloaders = accelerator.prepare(model, *eval_dataloaders)
     else:
@@ -190,6 +191,9 @@ if __name__ == "__main__":
 
         scheduler = CosineAnnealingLR(opt, T_max=len(dataloader) * args.epochs, eta_min=args.min_lr or args.lr)
         model, opt, scheduler, dataloader, *eval_dataloaders, = accelerator.prepare(model, opt, scheduler, dataloader, *eval_dataloaders)
+
+    best_accuracy = 0
+    step = 0
 
     tbar = tqdm(range(args.epochs * len(dataloader)), disable=not accelerator.is_main_process or args.only_eval)
     for iepoch in range(args.epochs):
@@ -199,7 +203,7 @@ if __name__ == "__main__":
                     model.eval()
                     all_scores, all_delta_scores, all_tokens = [], [], []
 
-                    for batch in tqdm(eval_dataloader, desc=f"Evaluating on {dataset_name}", disable=not accelerator.is_main_process, leave=False):
+                    for batch in tqdm(eval_dataloader, desc=f"Evaluating on {dataset_name}", disable=not accelerator.is_main_process, leave=args.only_eval):
                         with torch.no_grad():
                             scores = model(**batch)[0]
 
@@ -234,10 +238,15 @@ if __name__ == "__main__":
                             exit()
                         else:
                             path = f"{model_name}_{args.dataset}".replace("/", "_").replace(":", "_").replace("@", "_")
-                            model.save_pretrained(os.path.join(args.checkpoint_dir, path))
+                            accelerator.unwrap_model(model).save_pretrained(
+                                os.path.join(args.checkpoint_dir, path),
+                                save_function=accelerator.save,
+                                is_main_process=accelerator.is_main_process,
+                                state_dict=accelerator.get_state_dict(model),
+                            )
                             if accelerator.is_main_process:
                                 tokenizer.save_pretrained(os.path.join(args.checkpoint_dir, path))
-                            accelerator.print(f"Checkpointing with {best_accuracy} -> {args.checkpoint_dir}")
+                            accelerator.print(f" Checkpointing -> {os.path.join(args.checkpoint_dir, path)}")
 
                     if dataset_name == args.dataset:
                         tbar.set_postfix(accuracy=accuracy, best_accuracy=best_accuracy)
@@ -245,12 +254,14 @@ if __name__ == "__main__":
                 accelerator.wait_for_everyone()
                 model.train()
 
-            scores = model(**batch)[0]
-            loss = -F.logsigmoid(scores.reshape(-1, 2).diff()).mean()
-            accelerator.backward(loss)
-            opt.step()
-            opt.zero_grad()
-            scheduler.step()
+            with accelerator.accumulate(model):
+                scores = model(**batch, use_cache=not args.gradient_checkpointing)[0]
+                loss = -F.logsigmoid(scores.reshape(-1, 2).diff()).mean()
+                accelerator.backward(loss)
+                opt.step()
+                opt.zero_grad()
+                scheduler.step()
+
             tbar.update()
             tbar.set_description(f"Training {args.model_path} on {args.dataset}; loss: {loss.item():.4f}")
             accelerator.log({"loss": loss.item(), "lr": float(scheduler.get_last_lr()[0])}, step=step)
