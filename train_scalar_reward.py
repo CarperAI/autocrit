@@ -2,6 +2,7 @@ import torch
 import wandb
 import argparse
 import os
+import transformers
 import numpy as np
 from tqdm import tqdm
 from time import time
@@ -117,7 +118,12 @@ if __name__ == "__main__":
 
     def to_vicuna_format(sample):
         return {
-            "prompt": sample["prompt"].replace("\n\nHuman:", "USER:").replace("\n\nAssistant:", " ASSISTANT:")[4:],
+            "prompt": sample["prompt"].replace("\n\nHuman:", "USER:").replace("\n\nAssistant:", " ASSISTANT:"),
+        }
+
+    def to_oa_format(sample):
+        return {
+            "prompt": sample["prompt"].replace("\n\nHuman: ", "</s><|prompter|>").replace("\n\nAssistant: ", "</s><|assistant|>")[4:],
         }
 
     def tokenize(prompt, selected, rejected, tokenizer):
@@ -137,6 +143,9 @@ if __name__ == "__main__":
         dataset = dataset.map(lambda x: {"selected": x["replies"][0], "rejected": x["replies"][1]}, remove_columns=["replies"])
     accelerator.print(args.dataset, dataset)
 
+    if args.add_oasst_tokens:
+        dataset = dataset.map(to_oa_format)
+
     eval_dataloaders = []
     for name in args.calibration_datasets:
         calibration_dataset = load_dataset(name)
@@ -154,7 +163,11 @@ if __name__ == "__main__":
     dataloader = torch.utils.data.DataLoader(tokenized["train"], shuffle=True, batch_size=args.batch_size, collate_fn=collate_fn)
     eval_dataloaders.append(torch.utils.data.DataLoader(tokenized["test"], shuffle=False, batch_size=args.batch_size, collate_fn=collate_fn))
 
-    model = AutoModelForSequenceClassification.from_pretrained(args.model_path, revision=args.revision, num_labels=1, load_in_4bit=args.load_in_4bit)
+    if transformers.__version__ >= "4.30.0":
+        kwargs = {"load_in_4bit": args.load_in_4bit}
+    else:
+        kwargs = {}
+    model = AutoModelForSequenceClassification.from_pretrained(args.model_path, revision=args.revision, num_labels=1, **kwargs)
     model.config.pad_token_id = tokenizer.pad_token_id
     model.resize_token_embeddings(len(tokenizer))
 
