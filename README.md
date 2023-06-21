@@ -2,11 +2,12 @@
 A repository for transformer critique learning and generation.
 
 ## Scalar reward models
-Train [Vicuna-13B](https://vicuna.lmsys.org) on [Helpful and Harmless dataset](https://github.com/anthropics/hh-rlhf):
+Train [OpenLLaMA-13B](https://github.com/openlm-research/open_llama) on [Helpful and Harmless dataset](https://github.com/anthropics/hh-rlhf):
 
 ```bash
 accelerate launch --config_file configs/accelerate/zero2.yaml \
-           --model_path TheBloke/vicuna-13B-1.1-HF \
+           train_reward_model.py \
+           --model_path openlm-research/open_llama_13b \
            --dataset pvduy/rm_oa_hh \
            --batch_size 1 \
            --eval_interval 1000 \
@@ -15,19 +16,21 @@ accelerate launch --config_file configs/accelerate/zero2.yaml \
            --num_unfrozen_layers 12 \
            --gradient_checkpointing \
            --checkpoint_dir checkpoints \
-           --add_oasst_tokens \
-           --calibration_datasets reciprocate/vicuna-fair-eval_format-oa
+           --calibration_datasets reciprocate/vicuna-fair-eval
 ```
 
+Usage:
 ```python
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-ckpt = "checkpoints/TheBloke_vicuna-13B-1.1-HF_b71def77_pvduy_rm_oa_hh"
+ckpt = "reciprocate/openllama-13b_rm_oasst-hh"
 model = AutoModelForSequenceClassification.from_pretrained(ckpt, load_in_4bit=True)
 tokenizer = AutoTokenizer.from_pretrained(ckpt)
 
-model(**tokenizer("This sentence is a lie.", return_tensors="pt"))[0].item()
+model(**tokenizer("ASSISTANT: This sentence is a lie.", return_tensors="pt"))[0].item()
 ```
+
+Output:
 ```python
->>> -5.80913782119751
+-1.626953125
 ```
