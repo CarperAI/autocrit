@@ -104,7 +104,7 @@ if __name__ == "__main__":
     accelerator = Accelerator(log_with="wandb")
     accelerator.init_trackers(
         project_name="autocrit",
-        config={"batch_size": args.batch_size, "lr": args.lr},
+        config=vars(args),
         init_kwargs={"wandb": {"name": f"{model_name}@{args.dataset}"}},
     )
 
@@ -115,16 +115,6 @@ if __name__ == "__main__":
     tokenizer.add_special_tokens({"pad_token": "<|padding|>"})
     tokenizer.padding_side = "right"
     tokenizer.truncation_side = "left"
-
-    def to_vicuna_format(sample):
-        return {
-            "prompt": sample["prompt"].replace("\n\nHuman:", "USER:").replace("\n\nAssistant:", " ASSISTANT:"),
-        }
-
-    def to_oa_format(sample):
-        return {
-            "prompt": sample["prompt"].replace("\n\nHuman: ", "</s><|prompter|>").replace("\n\nAssistant: ", "</s><|assistant|>")[4:],
-        }
 
     def tokenize(prompt, selected, rejected, tokenizer):
         return {
@@ -143,8 +133,38 @@ if __name__ == "__main__":
         dataset = dataset.map(lambda x: {"selected": x["replies"][0], "rejected": x["replies"][1]}, remove_columns=["replies"])
     accelerator.print(args.dataset, dataset)
 
+    def to_vicuna_format(sample):
+        prompt = sample["prompt"].strip()
+        prompt = prompt.replace("\n\nHuman: ", "</s>USER: ") \
+                       .replace("\n\nAssistant: ", " ASSISTANT: ") \
+                       .replace("\n\nAssistant:", " ASSISTANT:")
+        if prompt.startswith("Human: "):
+            prompt = prompt.replace("Human: ", "USER: ")
+        if prompt.startswith("</s>"):
+            prompt = prompt[4:]
+
+        selected = " " + sample["selected"].strip()
+        rejected = " " + sample["rejected"].strip()
+
+        return {"prompt": prompt, "selected": selected, "rejected": rejected}
+
+    def to_oa_format(sample):
+        prompt = sample["prompt"].strip()
+        prompt = prompt.replace("\n\nHuman: ", "</s><|prompter|>") \
+                       .replace("\n\nAssistant: ", "</s><|assistant|>") \
+                       .replace("\n\nAssistant:", "</s><|assistant|>")
+        if prompt.startswith("Human: "):
+            prompt = prompt.replace("Human: ", "<|prompter|>")
+
+        selected = sample["selected"].strip()
+        rejected = sample["rejected"].strip()
+
+        return {"prompt": prompt, "selected": selected, "rejected": rejected}
+
     if args.add_oasst_tokens:
         dataset = dataset.map(to_oa_format)
+    else:
+        dataset = dataset.map(to_vicuna_format)
 
     eval_dataloaders = []
     for name in args.calibration_datasets:
@@ -250,7 +270,7 @@ if __name__ == "__main__":
                         if args.only_eval:
                             exit()
                         else:
-                            path = f"{model_name}_{args.dataset}".replace("/", "_").replace(":", "_").replace("@", "_")
+                            path = f"{model_name}_{args.dataset}_{args.lr}".replace("/", "_").replace(":", "_").replace("@", "_")
                             accelerator.unwrap_model(model).save_pretrained(
                                 os.path.join(args.checkpoint_dir, path),
                                 save_function=accelerator.save,
@@ -259,7 +279,7 @@ if __name__ == "__main__":
                             )
                             if accelerator.is_main_process:
                                 tokenizer.save_pretrained(os.path.join(args.checkpoint_dir, path))
-                            accelerator.print(f" Checkpointing -> {os.path.join(args.checkpoint_dir, path)}")
+                            accelerator.print(f"Checkpointing -> {os.path.join(args.checkpoint_dir, path)}")
 
                     if dataset_name == args.dataset:
                         tbar.set_postfix(accuracy=accuracy, best_accuracy=best_accuracy)
