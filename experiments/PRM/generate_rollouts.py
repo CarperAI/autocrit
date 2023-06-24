@@ -17,7 +17,7 @@ This gives us significantly improved flexibility, as autocrit is not built aroun
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--model", type=str, default="WizardLM/WizardLM-7B-V1.0", help="Path to HF checkpoint with the base model"
+        "--model", type=str, default="TheBloke/wizardLM-7B-HF", help="Path to HF checkpoint with the base model"
     )
     return parser.parse_args()
 
@@ -31,8 +31,9 @@ if __name__ == "__main__":
     dataset = datasets.load_dataset("math_dataset", "algebra__linear_1d", split="train")
 
     # write a prompt that solicits the answer using CoT
-    def construct_prompt(input_text):
-        prompt = "Solve for x: " + input_text + ". Think step by step about how you would solve this problem.\nAnswer:\n1."
+    def construct_prompt_wizard7b(input_text):
+        prompt = "Instruction: Solve for x: " + input_text + ". Think step by step about how you would solve this problem. Number your steps.\n\n\
+Response:\n"
         return prompt
 
     # test the above code
@@ -43,15 +44,11 @@ if __name__ == "__main__":
 
     # inference
     generate_params = {
-        "num_return_sequences": 2,
-        "max_length": 100,
-        "num_beams": 2,
-        "early_stopping": True,
+        "do_sample": True,
+        "top_k": 10,
+        "max_new_tokens": 100,
     }
     rollouts = inference_hook.infer(input_texts=prompt, generate_params=generate_params)
 
     # print the rollouts
     print(rollouts)
-
-
-    

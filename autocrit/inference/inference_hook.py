@@ -53,6 +53,12 @@ class HuggingFaceHook(InferenceHook):
         # Load the model and tokenizer
         self.model = transformers.AutoModelForCausalLM.from_pretrained(self.model_name)
         self.tokenizer = transformers.AutoTokenizer.from_pretrained(self.tokenizer_name)
+
+        # cast model to fp16 and move to gpu if available
+        if torch.cuda.is_available():
+            self.model = self.model.half()
+            self.model.cuda()
+        
         # check if there is a padding token, if not add one
         if self.tokenizer.pad_token is None:
             self.tokenizer.add_special_tokens({"pad_token": "[PAD]"})
@@ -71,8 +77,8 @@ class HuggingFaceHook(InferenceHook):
         # assume input and output are batched
         inp_text = input_texts
 
-        inp_ids = self.tokenizer(inp_text, return_tensors="pt", padding=True).input_ids
-        output_txt = self.model.generate(inp_ids, **generate_params)
+        inps = self.tokenizer(inp_text, return_tensors="pt", padding=True).to(self.model.device)
+        output_txt = self.model.generate(**inps, **generate_params)
 
         # if we need to decode the text
         if not "no_decode" in generate_params:
@@ -115,9 +121,9 @@ class TritonHook(InferenceHook):
         # use self.client to call the model
         # assume input and output are batched
         inp_text = input_texts
-        inp_ids = self.tokenizer(inp_text, return_tensors="pt", padding=True).input_ids
+        inps = self.tokenizer(inp_text, return_tensors="pt", padding=True)
         # call infer
-        logits, output_txt = triton_call(self.client, self.model_name, inp_ids, **generate_params)
+        logits, output_txt = triton_call(self.client, self.model_name, inps.input_ids, **generate_params)
 
         if not "no_decode" in generate_params:
             output_txt = self.tokenizer.batch_decode(output_txt, skip_special_tokens=True)
