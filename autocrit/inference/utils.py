@@ -6,7 +6,9 @@ The functions below prepare input for triton client inference and call the trito
 '''
 
 def prepare_inference_inputs(
-    inputs_ids: torch.IntTensor, new_tokens: int = 1, temperature: float = 1.0
+    inputs_ids: torch.IntTensor, 
+    new_tokens: int = 1, 
+    temperature: float = 1.0
 ):
     """
     Prepare inputs for triton client inference.
@@ -43,7 +45,11 @@ def prepare_inference_inputs(
 
 
 async def triton_call(
-    triton_client, model_name, input_ids, new_tokens: int = 1, temperature: float = 1.0
+    triton_client : grpcclient.InferenceServerClient,
+    model_name : str,
+    input_ids : torch.IntTensor,
+    new_tokens: int = 1, 
+    temperature: float = 1.0
 ):
     """
     Call triton server for inference.
@@ -72,7 +78,7 @@ def best_of_n(
      model,
      tokenizer,
      prompt : str,
-     n : int = 100,
+     n : int = 20,
      top_k : int = 1,
      mbs : int = 20,
      gen_kwargs : Dict[str, Any] = {},
@@ -120,7 +126,7 @@ def best_of_n(
     else:
         iterator = range(n // mbs)
 
-# if eos is not none, then encode it
+    # if eos is not none, then encode it
     if eos_token_id is not None:
         eos_token_id = tokenizer.encode(eos_token_id)[0]
 
