@@ -2,9 +2,9 @@ import argparse
 import os
 import torch
 import transformers
-from typing import Tuple, Any, Optional
+from typing import Tuple, Any, Optional, List, Dict
 import tritonclient.grpc.aio as grpcclient
-from utils import triton_call
+from autocrit.inference.utils import triton_call
 
 '''
 We're using inference hooks rather than directly using hugging face generate incase we want to switch to a triton client at some point.
@@ -23,7 +23,14 @@ class InferenceHook:
         pass
 
     # Calls the inference API and returns the result
-    def infer(self, *args: Any, **kwds: Any) -> Any:
+    def infer(self, input_texts : List[str], 
+              generate_params : Dict[str, Any], 
+              **kwargs: Any) -> Any:
+        """
+        input_texts: a list of strings, each string is a prompt
+        generate_params: a dictionary of parameters to pass to the generate function
+        kwargs: any additional arguments to pass to the generate function
+        """
         pass
 
 
@@ -39,19 +46,39 @@ class HuggingFaceHook(InferenceHook):
         else:
             self.tokenizer_name = tokenizer_name
 
+        self.model = None
+        self.tokenizer = None
+
     def load(self, **kwargs):
         # Load the model and tokenizer
         self.model = transformers.AutoModelForCausalLM.from_pretrained(self.model_name)
         self.tokenizer = transformers.AutoTokenizer.from_pretrained(self.tokenizer_name)
+        # check if there is a padding token, if not add one
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.add_special_tokens({"pad_token": "[PAD]"})
 
-    def infer(self, *args: Any, **kwds: Any) -> Any:
+    def infer(self, input_texts : List[str], 
+              generate_params : Dict[str, Any], 
+              **kwargs: Any) -> Any:
+        """
+        input_texts: a list of strings, each string is a prompt
+        generate_params: a dictionary of parameters to pass to the generate function
+        kwargs: any additional arguments to pass to the generate function
+        returns: a list of strings, each string is a generated output
+        """
+
         # model.generate, use the tokenizer to convert the output to text and kwds for gen arguments
         # assume input and output are batched
-        inp_text = kwds["input_texts"]
+        inp_text = input_texts
+
         inp_ids = self.tokenizer(inp_text, return_tensors="pt", padding=True).input_ids
-        out_ids = self.model.generate(inp_ids, **kwds)
-        out_text = self.tokenizer.batch_decode(out_ids, skip_special_tokens=True)
-        return out_text
+        output_txt = self.model.generate(inp_ids, **generate_params)
+
+        # if we need to decode the text
+        if not "no_decode" in generate_params:
+            output_txt = self.tokenizer.batch_decode(output_txt, skip_special_tokens=True)
+
+        return output_txt
     
 class TritonHook(InferenceHook):
     def __init__(self, dir : str, model_name : str, tokenizer_name : Optional[str] = None):
@@ -70,15 +97,34 @@ class TritonHook(InferenceHook):
         # create a client using url
         self.client = grpcclient.InferenceServerClient(url=self.url)
         self.tokenizer = transformers.AutoTokenizer.from_pretrained(self.tokenizer_name)
+        # check if there is a padding token, if not add one
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.add_special_tokens({"pad_token": "[PAD]"})
 
 
-    def infer(self, *args: Any, **kwds: Any) -> Any:
+    def infer(self, input_texts : List[str], 
+              generate_params : Dict[str, Any], 
+              **kwargs: Any) -> Any:
+        """
+        input_texts: a list of strings, each string is a prompt
+        generate_params: a dictionary of parameters to pass to the generate function
+        kwargs: any additional arguments to pass to the generate function
+        returns: a list of strings, each string is a generated output
+        """
+
         # use self.client to call the model
         # assume input and output are batched
-        inp_text = kwds["input_texts"]
+        inp_text = input_texts
         inp_ids = self.tokenizer(inp_text, return_tensors="pt", padding=True).input_ids
         # call infer
-        logits, output_ids = triton_call(self.client, self.model_name, inp_ids, **kwds)
-        out_text = self.tokenizer.batch_decode(output_ids, skip_special_tokens=True)
-        return out_text
+        logits, output_txt = triton_call(self.client, self.model_name, inp_ids, **generate_params)
+
+        if not "no_decode" in generate_params:
+            output_txt = self.tokenizer.batch_decode(output_txt, skip_special_tokens=True)
+
+        # check if logits are needed
+        if generate_params["return_logits"]:
+            return output_txt, logits
+        else:
+            return output_txt
     

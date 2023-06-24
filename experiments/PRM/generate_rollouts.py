@@ -7,6 +7,7 @@ import argparse
 import os
 import torch
 import transformers
+import datasets
 from typing import Tuple, Any
 
 '''
@@ -16,7 +17,7 @@ This gives us significantly improved flexibility, as autocrit is not built aroun
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--model", type=str, required=True, default="WizardLM/WizardLM-7B-V1.0", help="Path to HF checkpoint with the base model"
+        "--model", type=str, default="WizardLM/WizardLM-7B-V1.0", help="Path to HF checkpoint with the base model"
     )
     return parser.parse_args()
 
@@ -24,13 +25,33 @@ if __name__ == "__main__":
     args = parse_args()
     # Load the model and tokenizer
     inference_hook = HuggingFaceHook(args.model)
+    inference_hook.load()
 
-    # load the MATH dataset from hugging face hub
-    dataset = transformers.load_dataset("math_dataset", "algebra__linear_1d_composed", split="train")
+    # load the MATH dataset, using datasets. 
+    dataset = datasets.load_dataset("math_dataset", "algebra__linear_1d", split="train")
 
     # write a prompt that solicits the answer using CoT
     def construct_prompt(input_text):
         prompt = "Solve for x: " + input_text + ". Think step by step about how you would solve this problem.\nAnswer:\n1."
         return prompt
 
-    # generate the rollouts
+    # test the above code
+
+    # write an example algebra problem
+    input_text = "2x + 3 = 7"
+    prompt = construct_prompt(input_text)
+
+    # inference
+    generate_params = {
+        "num_return_sequences": 2,
+        "max_length": 100,
+        "num_beams": 2,
+        "early_stopping": True,
+    }
+    rollouts = inference_hook.infer(input_texts=prompt, generate_params=generate_params)
+
+    # print the rollouts
+    print(rollouts)
+
+
+    
