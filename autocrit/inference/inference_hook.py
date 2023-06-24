@@ -4,7 +4,7 @@ import torch
 import transformers
 from typing import Tuple, Any, Optional, List, Dict
 import tritonclient.grpc.aio as grpcclient
-from autocrit.inference.utils import triton_call
+from autocrit.inference.utils import triton_call, best_of_n
 
 '''
 We're using inference hooks rather than directly using hugging face generate incase we want to switch to a triton client at some point.
@@ -76,16 +76,35 @@ class HuggingFaceHook(InferenceHook):
         # model.generate, use the tokenizer to convert the output to text and kwds for gen arguments
         # assume input and output are batched
         inp_text = input_texts
-
         inps = self.tokenizer(inp_text, return_tensors="pt", padding=True).to(self.model.device)
-        output_txt = self.model.generate(**inps, **generate_params)
+
+        output_txt = self.model.generate(input_ids=inps.input_ids, attention_mask=inps.attention_mask, **generate_params)
 
         # if we need to decode the text
-        if not "no_decode" in generate_params:
+        if not "no_decode" in kwargs:
             output_txt = self.tokenizer.batch_decode(output_txt, skip_special_tokens=True)
 
         return output_txt
-    
+
+# Inference hook that uses the HuggingFace API to call a model. Uses the best of N sampling method
+class HuggingFaceHookBestOfN(HuggingFaceHook):
+    def __init__(self, dir : str, tokenizer_name : Optional[str] = None):
+        super().__init__(dir, tokenizer_name)
+
+    def infer(self, input_texts : List[str], 
+              generate_params : Dict[str, Any], 
+              **kwargs: Any) -> Any:
+        """
+        input_texts: a list of strings, each string is a prompt
+        generate_params: a dictionary of parameters to pass to the generate function
+        kwargs: any additional arguments to pass to the generate function
+        returns: a list of strings, each string is a generated output
+        """
+
+        output_txt = best_of_n(self.model, self.tokenizer, input_texts, gen_kwargs=generate_params, **kwargs)
+        return output_txt
+
+
 class TritonHook(InferenceHook):
     def __init__(self, dir : str, model_name : str, tokenizer_name : Optional[str] = None):
         super().__init__(dir)
@@ -125,7 +144,7 @@ class TritonHook(InferenceHook):
         # call infer
         logits, output_txt = triton_call(self.client, self.model_name, inps.input_ids, **generate_params)
 
-        if not "no_decode" in generate_params:
+        if not "no_decode" in kwargs:
             output_txt = self.tokenizer.batch_decode(output_txt, skip_special_tokens=True)
 
         # check if logits are needed
