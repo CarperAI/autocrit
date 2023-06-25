@@ -5,6 +5,8 @@ import transformers
 from typing import Tuple, Any, Optional, List, Dict
 import tritonclient.grpc.aio as grpcclient
 from autocrit.inference.utils import triton_call, best_of_n
+from text_generation import Client
+import logging  
 
 '''
 We're using inference hooks rather than directly using hugging face generate incase we want to switch to a triton client at some point.
@@ -39,6 +41,10 @@ class InferenceHook:
 # Inference hook that uses the HuggingFace API to call a model
 class HuggingFaceHook(InferenceHook):
     def __init__(self, dir : str, tokenizer_name : Optional[str] = None):
+        """
+        dir: the directory of the model
+        tokenizer_name: the name of the tokenizer to use, if None, use the model name
+        """
         super().__init__(dir)
         self.model_name = dir
         if tokenizer_name is None:
@@ -54,11 +60,6 @@ class HuggingFaceHook(InferenceHook):
         self.model = transformers.AutoModelForCausalLM.from_pretrained(self.model_name)
         self.tokenizer = transformers.AutoTokenizer.from_pretrained(self.tokenizer_name)
 
-        # cast model to fp16 and move to gpu if available
-        if torch.cuda.is_available():
-            self.model = self.model.half()
-            self.model.cuda()
-        
         # check if there is a padding token, if not add one
         if self.tokenizer.pad_token is None:
             self.tokenizer.add_special_tokens({"pad_token": "[PAD]"})
@@ -89,6 +90,10 @@ class HuggingFaceHook(InferenceHook):
 # Inference hook that uses the HuggingFace API to call a model. Uses the best of N sampling method
 class HuggingFaceHookBestOfN(HuggingFaceHook):
     def __init__(self, dir : str, tokenizer_name : Optional[str] = None):
+        """
+        dir: the directory of the model
+        tokenizer_name: the name of the tokenizer to use, if None, use the model name
+        """
         super().__init__(dir, tokenizer_name)
 
     def infer(self, input_texts : List[str], 
@@ -107,8 +112,14 @@ class HuggingFaceHookBestOfN(HuggingFaceHook):
 
 class TritonHook(InferenceHook):
     def __init__(self, dir : str, model_name : str, tokenizer_name : Optional[str] = None):
+        """
+        dir: location of the triton server
+        model_name: the name of the model to use
+        tokenizer_name: the name of the tokenizer to use, if None, use the model name
+        """
         super().__init__(dir)
         self.url = dir # url contains host:port
+        # TODO: if URL is a path to a triton model, we shold load the model and launch the server
         self.model_name = model_name
         if tokenizer_name is None:
             self.tokenizer_name = model_name
@@ -153,3 +164,51 @@ class TritonHook(InferenceHook):
         else:
             return output_txt
     
+
+# Inference hook that uses the HuggingFace API to call a model
+class TextGenerationHook(InferenceHook):
+    def __init__(self, dir : str):
+        super().__init__(dir)
+        self.model_name = dir
+        if tokenizer_name is None:
+            self.tokenizer_name = dir
+        else:
+            self.tokenizer_name = tokenizer_name
+
+        self.client = None
+
+    def load(self, **kwargs):
+        # get num shards and port, used for the launcher script
+        num_shards = kwargs.get("num_shards", 1)
+        port = kwargs.get("port", 8080)
+
+        # launch the model using the model name and text_generation_launcher.sh
+        # The following line runs the launcher script
+        output = subprocess.run(["sbatch text_generation_launcher.sbatch", self.model_name, str(num_shards), str(port)], capture_output=True)
+        logging.info(output.stdout.decode("utf-8"))
+        # check return code
+        if output.returncode != 0:
+            logging.log(logging.ERROR, output.stderr.decode("utf-8"))
+            raise RuntimeError("Failed to launch model")
+        else: 
+            logging.info("Model launched successfully.")
+
+        # extract IP address from output
+        ip = re.search(r"(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})", output.stdout.decode("utf-8")).group(0)
+
+        # Create the client
+        self.client = Client(f"http://{ip}:{port}")
+        
+    def infer(self, input_texts : List[str], 
+              generate_params : Dict[str, Any], 
+              **kwargs: Any) -> Any:
+        """
+        input_texts: a list of strings, each string is a prompt
+        generate_params: a dictionary of parameters to pass to the generate function
+        kwargs: any additional arguments to pass to the generate function
+        returns: a list of strings, each string is a generated output
+        """
+
+        # use self.client to call the model
+        output_txt = self.client.generate(input_texts, **generate_params).tokens.text
+        return output_txt

@@ -20,7 +20,7 @@ This gives us significantly improved flexibility, as autocrit is not built aroun
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--model", type=str, default="TheBloke/wizardLM-7B-HF", help="Path to HF checkpoint with the base model"
+        "--model", type=str, default="ehartford/WizardLM-13B-Uncensored", help="Path to HF checkpoint with the base model"
     )
     return parser.parse_args()
 
@@ -59,7 +59,6 @@ Response:\n Step 1)"
     # every step is seperated by "Step n)", where n is the step number
     # split the rollouts into steps
     def split_rollout(rollout):
-        print(rollout)
         # First, only take whats after Response:\n
         rollout = rollout.split("Response:\n")[1]
 
