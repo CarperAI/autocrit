@@ -1,28 +1,30 @@
-[2m2023-06-27T14:25:05.731999Z[0m [32m INFO[0m [2mtext_generation_launcher[0m[2m:[0m Args { model_id: "gpt2", revision: None, sharded: None, num_shard: Some(1), quantize: None, trust_remote_code: false, max_concurrent_requests: 128, max_best_of: 2, max_stop_sequences: 4, max_input_length: 1000, max_total_tokens: 1512, max_batch_size: None, waiting_served_ratio: 1.2, max_batch_total_tokens: 32000, max_waiting_tokens: 20, port: 8080, shard_uds_path: "/tmp/text-generation-server", master_addr: "localhost", master_port: 29500, huggingface_hub_cache: None, weights_cache_override: None, disable_custom_kernels: false, json_output: false, otlp_endpoint: None, cors_allow_origin: [], watermark_gamma: None, watermark_delta: None, ngrok: false, ngrok_authtoken: None, ngrok_domain: None, ngrok_username: None, ngrok_password: None, env: false }
-[2m2023-06-27T14:25:05.732952Z[0m [32m INFO[0m [2mtext_generation_launcher[0m[2m:[0m Starting download process.
-[2m2023-06-27T14:25:18.727122Z[0m [32m INFO[0m [1mdownload[0m: [2mtext_generation_launcher[0m[2m:[0m Files are already present on the host. Skipping download.
+/var/spool/slurmd/job20209/slurm_script: line 34: /admin/home-louis/anaconda3/bin/activate: No such file or directory
+[2m2023-06-27T15:45:35.988102Z[0m [32m INFO[0m [2mtext_generation_launcher[0m[2m:[0m Args { model_id: "gpt2", revision: None, sharded: None, num_shard: Some(1), quantize: None, trust_remote_code: false, max_concurrent_requests: 128, max_best_of: 2, max_stop_sequences: 4, max_input_length: 1000, max_total_tokens: 1512, max_batch_size: None, waiting_served_ratio: 1.2, max_batch_total_tokens: 32000, max_waiting_tokens: 20, port: 8080, shard_uds_path: "/tmp/text-generation-server", master_addr: "localhost", master_port: 29500, huggingface_hub_cache: None, weights_cache_override: None, disable_custom_kernels: false, json_output: false, otlp_endpoint: None, cors_allow_origin: [], watermark_gamma: None, watermark_delta: None, ngrok: false, ngrok_authtoken: None, ngrok_domain: None, ngrok_username: None, ngrok_password: None, env: false }
+[2m2023-06-27T15:45:35.989207Z[0m [32m INFO[0m [2mtext_generation_launcher[0m[2m:[0m Starting download process.
+[2m2023-06-27T15:46:02.345773Z[0m [32m INFO[0m [1mdownload[0m: [2mtext_generation_launcher[0m[2m:[0m Files are already present on the host. Skipping download.
 
-[2m2023-06-27T14:25:19.355753Z[0m [32m INFO[0m [2mtext_generation_launcher[0m[2m:[0m Successfully downloaded weights.
-[2m2023-06-27T14:25:19.356216Z[0m [32m INFO[0m [2mtext_generation_launcher[0m[2m:[0m Starting shard 0
-[2m2023-06-27T14:25:27.856955Z[0m [33m WARN[0m [1mshard-manager[0m: [2mtext_generation_launcher[0m[2m:[0m Could not import Flash Attention enabled models
+[2m2023-06-27T15:46:03.138034Z[0m [32m INFO[0m [2mtext_generation_launcher[0m[2m:[0m Successfully downloaded weights.
+[2m2023-06-27T15:46:03.138339Z[0m [32m INFO[0m [2mtext_generation_launcher[0m[2m:[0m Starting shard 0
+[2m2023-06-27T15:46:13.152551Z[0m [32m INFO[0m [2mtext_generation_launcher[0m[2m:[0m Waiting for shard 0 to be ready...
+[2m2023-06-27T15:46:17.481401Z[0m [33m WARN[0m [1mshard-manager[0m: [2mtext_generation_launcher[0m[2m:[0m Could not import Flash Attention enabled models
 Traceback (most recent call last):
-  File "/fsx/home-louis/autocrit/autocrit/inference/text_generation_inference/venv/bin/text-generation-server", line 8, in <module>
+  File "/fsx/home-louis/miniconda3/envs/text-generation-inference/bin/text-generation-server", line 8, in <module>
     sys.exit(app())
-  File "/fsx/home-louis/autocrit/autocrit/inference/text_generation_inference/venv/lib/python3.9/site-packages/typer/main.py", line 311, in __call__
+  File "/fsx/home-louis/miniconda3/envs/text-generation-inference/lib/python3.9/site-packages/typer/main.py", line 311, in __call__
     return get_command(self)(*args, **kwargs)
-  File "/fsx/home-louis/autocrit/autocrit/inference/text_generation_inference/venv/lib/python3.9/site-packages/click/core.py", line 1130, in __call__
+  File "/fsx/home-louis/miniconda3/envs/text-generation-inference/lib/python3.9/site-packages/click/core.py", line 1130, in __call__
     return self.main(*args, **kwargs)
-  File "/fsx/home-louis/autocrit/autocrit/inference/text_generation_inference/venv/lib/python3.9/site-packages/typer/core.py", line 778, in main
+  File "/fsx/home-louis/miniconda3/envs/text-generation-inference/lib/python3.9/site-packages/typer/core.py", line 778, in main
     return _main(
-  File "/fsx/home-louis/autocrit/autocrit/inference/text_generation_inference/venv/lib/python3.9/site-packages/typer/core.py", line 216, in _main
+  File "/fsx/home-louis/miniconda3/envs/text-generation-inference/lib/python3.9/site-packages/typer/core.py", line 216, in _main
     rv = self.invoke(ctx)
-  File "/fsx/home-louis/autocrit/autocrit/inference/text_generation_inference/venv/lib/python3.9/site-packages/click/core.py", line 1657, in invoke
+  File "/fsx/home-louis/miniconda3/envs/text-generation-inference/lib/python3.9/site-packages/click/core.py", line 1657, in invoke
     return _process_result(sub_ctx.command.invoke(sub_ctx))
-  File "/fsx/home-louis/autocrit/autocrit/inference/text_generation_inference/venv/lib/python3.9/site-packages/click/core.py", line 1404, in invoke
+  File "/fsx/home-louis/miniconda3/envs/text-generation-inference/lib/python3.9/site-packages/click/core.py", line 1404, in invoke
     return ctx.invoke(self.callback, **ctx.params)
-  File "/fsx/home-louis/autocrit/autocrit/inference/text_generation_inference/venv/lib/python3.9/site-packages/click/core.py", line 760, in invoke
+  File "/fsx/home-louis/miniconda3/envs/text-generation-inference/lib/python3.9/site-packages/click/core.py", line 760, in invoke
     return __callback(*args, **kwargs)
-  File "/fsx/home-louis/autocrit/autocrit/inference/text_generation_inference/venv/lib/python3.9/site-packages/typer/main.py", line 683, in wrapper
+  File "/fsx/home-louis/miniconda3/envs/text-generation-inference/lib/python3.9/site-packages/typer/main.py", line 683, in wrapper
     return callback(**use_params)  # type: ignore
   File "/fsx/home-louis/autocrit/autocrit/inference/text_generation_inference/text-generation-inference/server/text_generation_server/cli.py", line 58, in serve
     from text_generation_server import server
@@ -58,16 +60,11 @@ Traceback (most recent call last):
     import flash_attn_cuda
 ModuleNotFoundError: No module named 'flash_attn_cuda'
  [2m[3mrank[0m[2m=[0m0[0m
-[2m2023-06-27T14:25:29.370050Z[0m [32m INFO[0m [2mtext_generation_launcher[0m[2m:[0m Waiting for shard 0 to be ready...
-[2m2023-06-27T14:25:39.379881Z[0m [32m INFO[0m [2mtext_generation_launcher[0m[2m:[0m Waiting for shard 0 to be ready...
-[2m2023-06-27T14:25:49.330638Z[0m [32m INFO[0m [1mshard-manager[0m: [2mtext_generation_launcher[0m[2m:[0m Server started at unix:///tmp/text-generation-server-0
+[2m2023-06-27T15:46:23.164015Z[0m [32m INFO[0m [2mtext_generation_launcher[0m[2m:[0m Waiting for shard 0 to be ready...
+[2m2023-06-27T15:46:33.170943Z[0m [32m INFO[0m [2mtext_generation_launcher[0m[2m:[0m Waiting for shard 0 to be ready...
+[2m2023-06-27T15:46:39.936455Z[0m [32m INFO[0m [1mshard-manager[0m: [2mtext_generation_launcher[0m[2m:[0m Server started at unix:///tmp/text-generation-server-0
  [2m[3mrank[0m[2m=[0m0[0m
-[2m2023-06-27T14:25:49.389236Z[0m [32m INFO[0m [2mtext_generation_launcher[0m[2m:[0m Shard 0 ready in 30.031460092s
-[2m2023-06-27T14:25:49.483624Z[0m [32m INFO[0m [2mtext_generation_launcher[0m[2m:[0m Starting Webserver
-[2m2023-06-27T14:25:50.240665Z[0m [32m INFO[0m [2mtext_generation_router[0m[2m:[0m [2mrouter/src/main.rs[0m[2m:[0m[2m193:[0m Connected
-thread 'main' panicked at 'error binding to 0.0.0.0:8080: error creating server listener: Address already in use (os error 98)', /admin/home-louis/.cargo/registry/src/github.com-1ecc6299db9ec823/hyper-0.14.27/src/server/server.rs:79:13
-note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
-[2m2023-06-27T14:25:50.288365Z[0m [31mERROR[0m [2mtext_generation_launcher[0m[2m:[0m Webserver Crashed
-[2m2023-06-27T14:25:50.288414Z[0m [32m INFO[0m [2mtext_generation_launcher[0m[2m:[0m Shutting down shards
-[2m2023-06-27T14:25:50.618863Z[0m [32m INFO[0m [2mtext_generation_launcher[0m[2m:[0m Shard 0 terminated
-Error: WebserverFailed
+[2m2023-06-27T15:46:39.978290Z[0m [32m INFO[0m [2mtext_generation_launcher[0m[2m:[0m Shard 0 ready in 36.837908602s
+[2m2023-06-27T15:46:40.074821Z[0m [32m INFO[0m [2mtext_generation_launcher[0m[2m:[0m Starting Webserver
+[2m2023-06-27T15:46:40.961918Z[0m [32m INFO[0m [2mtext_generation_router[0m[2m:[0m [2mrouter/src/main.rs[0m[2m:[0m[2m193:[0m Connected
+slurmstepd: error: *** JOB 20209 ON ip-26-0-145-118 CANCELLED AT 2023-06-27T18:28:38 DUE TO PREEMPTION ***

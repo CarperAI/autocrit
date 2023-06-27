@@ -7,7 +7,7 @@ if ! conda env list | grep -q "text-generation-inference"; then
 fi
 
 # activate conda env text-generation-inference
-conda activate text-generation-inference
+source ~/anaconda3/bin/activate text-generation-inference
 
 # retrieve the path of the current conda env
 CONDA_ENV_PATH=$(conda info --base)/envs/$(conda info --envs | grep "*" | awk '{print $1}')/
@@ -27,7 +27,13 @@ unzip -o $PROTOC_ZIP -d $CONDA_ENV_PATH bin/protoc
 unzip -o $PROTOC_ZIP -d $CONDA_ENV_PATH 'include/*'
 rm -f $PROTOC_ZIP
 
+python -m pip install flash-attn=1.0.5
+
 # install text-generation-inference
 cd text-generation-inference
 module load cuda/11.8
 BUILD_EXTENSIONS=True make install # Install repos
+
+# support for flash-attn
+cd server
+make install-flash-attention

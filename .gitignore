@@ -153,3 +153,4 @@ ckpts/
 ray_results/
 
 venv/
+autocrit/inference/text_generation_inference/hf-infer.out

@@ -4,6 +4,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --output="%x.out"
 #SBATCH --job-name=hf-infer
+#SBATCH --exclusive
 
 
 # Check if the number of arguments is correct
@@ -29,6 +30,9 @@ fi
 # activate bash rc
 source ~/.bashrc
 cd text-generation-inference
+
+# activate conda env text-generation-inference
+source ~/anaconda3/bin/activate text-generation-inference
 
 # launch text-generation-inference server, using model_name as --model-id
 text-generation-launcher --model-id $model_name --num-shard $num_shards --port $3
