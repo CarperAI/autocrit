@@ -1,0 +1,5 @@
+# do not include the subdirectory of the cloned repo
+text_generation_inference/
+
+# do not include venv
+venv/

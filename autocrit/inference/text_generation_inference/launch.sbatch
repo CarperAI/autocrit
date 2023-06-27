@@ -21,13 +21,14 @@ num_shards=$2
 port=$3
 
 
+# check if conda env text-generation-inference exists, if not run create_venv.sh
+if ! conda env list | grep -q "text-generation-inference"; then
+    ./create_venv.sh
+fi
 
-# check if text-generation-inference dir exists, if not clone the repo
-if [ ! -d "text-generation-inference" ]; then
-    git clone https://github.com/huggingface/text-generation-inference.git
-
-conda activate text-generation-inference
+# activate bash rc
+source ~/.bashrc
 cd text-generation-inference
 
 # launch text-generation-inference server, using model_name as --model-id
-text-generaiton-launcher --model-id $model_name --num-shard $num_shards --port $3
+text-generation-launcher --model-id $model_name --num-shard $num_shards --port $3
