@@ -154,3 +154,4 @@ ray_results/
 
 venv/
 autocrit/inference/text_generation_inference/hf-infer.out
+autocrit/inference/text_generation_inference/hf-infer.out

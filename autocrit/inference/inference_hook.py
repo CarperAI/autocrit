@@ -182,23 +182,36 @@ class TextGenerationHook(InferenceHook):
         num_shards = kwargs.get("num_shards", 1)
         port = kwargs.get("port", 8080)
 
-        # launch the model using the model name and text_generation_launcher.sh
-        # The following line runs the launcher script
-        output = subprocess.run(["sbatch text_generation_launcher.sbatch", self.model_name, str(num_shards), str(port)], capture_output=True)
-        logging.info(output.stdout.decode("utf-8"))
-        # check return code
-        if output.returncode != 0:
-            logging.log(logging.ERROR, output.stderr.decode("utf-8"))
-            raise RuntimeError("Failed to launch model")
-        else: 
-            logging.info("Model launched successfully.")
+        # check if model name is a URL
+            if not self.model_name.startswith("http"):
+            # launch the model using the model name and text_generation_launcher.sh
+            # The following line runs the launcher script
+            output = subprocess.run(["sbatch./launch.sbatch MODEL_NAME="+str(self.model_name) + " NUM_SHARD="+str(num_shards) + " PORT="+str(port)], capture_output=True)
+            logging.info(output.stdout.decode("utf-8"))
+            # check return code
+            if output.returncode != 0:
+                logging.log(logging.ERROR, output.stderr.decode("utf-8"))
+                raise RuntimeError("Failed to launch model")
+            else: 
+                logging.info("Model launched successfully.")
 
-        # extract IP address from output
-        ip = re.search(r"(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})", output.stdout.decode("utf-8")).group(0)
+            # get the job id from the output
+            job_id = output.stdout.decode("utf-8").split(" ")[-1].strip()
+            logging.info("Job ID: " + str(job_id))
 
-        # Create the client
-        self.client = Client(f"http://{ip}:{port}")
-        
+            # run scontrol to get the ip address
+            output = subprocess.run(["scontrol show job " + str(job_id)], capture_output=True)
+
+            # get the host ip address from the output. It looks like this: BatchHost=ip-xx-x-xxx-xxx
+            ip = output.stdout.decode("utf-8").split("BatchHost=")[-1].strip()
+            # convert it into a useable ip address
+            ip = ip.replace("ip-", "").replace("-", ".")
+
+            # Create the client
+            self.client = Client(f"http://{ip}:{port}")
+        else:
+            self.client = Client(self.model_name)
+                
     def infer(self, input_texts : List[str], 
               generate_params : Dict[str, Any], 
               **kwargs: Any) -> Any:

@@ -6,24 +6,31 @@
 #SBATCH --job-name=hf-infer
 #SBATCH --exclusive
 
+for ARGUMENT in "$@"
+do
+   KEY=$(echo $ARGUMENT | cut -f1 -d=)
 
-# Check if the number of arguments is correct
-if [ "$#" -ne 3 ]; then
-    echo "Illegal number of parameters"
-    echo "Usage: ./text_generation_launcher.sh <model_name> <num_shards> <port>"
+   KEY_LENGTH=${#KEY}
+   VALUE="${ARGUMENT:$KEY_LENGTH+1}"
+
+   export "$KEY"="$VALUE"
+done
+
+# check if argument contains MODEL, NUMSHARD, PORT
+if [ -z "$MODEL" ] || [ -z "$NUMSHARD" ] || [ -z "$PORT" ]; then
+    echo "Please provide MODEL, NUM_SHARD, PORT"
     exit 1
 fi
 
-# take the model name as a parameter
-model_name=$1
-# take number of shards as a parameter
-num_shards=$2
-# take port number as a parameter
-port=$3
+# check if CONDAENV is defined
+if [ -z "$CONDAENV" ]; then
+    echo "CONDAENV not found, defaulting to text-generation-inference."
+    CONDA_ENV="text-generation-inference"
+fi
 
 
 # check if conda env text-generation-inference exists, if not run create_venv.sh
-if ! conda env list | grep -q "text-generation-inference"; then
+if ! conda env list | grep -q $CONDA_ENV; then
     ./create_venv.sh
 fi
 
@@ -32,7 +39,7 @@ source ~/.bashrc
 cd text-generation-inference
 
 # activate conda env text-generation-inference
-source ~/anaconda3/bin/activate text-generation-inference
+source ~/anaconda3/bin/activate $CONDA_ENV
 
 # launch text-generation-inference server, using model_name as --model-id
-text-generation-launcher --model-id $model_name --num-shard $num_shards --port $3
+text-generation-launcher --model-id $MODEL --num-shard $NUM_SHARD --port $PORT
