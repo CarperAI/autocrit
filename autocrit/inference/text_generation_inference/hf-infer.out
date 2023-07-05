@@ -1,1 +1,68 @@
-Please provide MODEL, NUM_SHARD, PORT
+[2m2023-07-03T10:27:32.614222Z[0m [32m INFO[0m [2mtext_generation_launcher[0m[2m:[0m Args { model_id: "gpt2", revision: None, sharded: None, num_shard: Some(1), quantize: None, trust_remote_code: false, max_concurrent_requests: 128, max_best_of: 2, max_stop_sequences: 4, max_input_length: 1000, max_total_tokens: 1512, max_batch_size: None, waiting_served_ratio: 1.2, max_batch_total_tokens: 32000, max_waiting_tokens: 20, port: 8080, shard_uds_path: "/tmp/text-generation-server", master_addr: "localhost", master_port: 29500, huggingface_hub_cache: None, weights_cache_override: None, disable_custom_kernels: false, json_output: false, otlp_endpoint: None, cors_allow_origin: [], watermark_gamma: None, watermark_delta: None, ngrok: false, ngrok_authtoken: None, ngrok_domain: None, ngrok_username: None, ngrok_password: None, env: false }
+[2m2023-07-03T10:27:32.614893Z[0m [32m INFO[0m [2mtext_generation_launcher[0m[2m:[0m Starting download process.
+[2m2023-07-03T10:27:51.016686Z[0m [32m INFO[0m [1mdownload[0m: [2mtext_generation_launcher[0m[2m:[0m Files are already present on the host. Skipping download.
+
+[2m2023-07-03T10:27:52.055743Z[0m [32m INFO[0m [2mtext_generation_launcher[0m[2m:[0m Successfully downloaded weights.
+[2m2023-07-03T10:27:52.056214Z[0m [32m INFO[0m [2mtext_generation_launcher[0m[2m:[0m Starting shard 0
+[2m2023-07-03T10:28:02.066202Z[0m [32m INFO[0m [2mtext_generation_launcher[0m[2m:[0m Waiting for shard 0 to be ready...
+[2m2023-07-03T10:28:02.821339Z[0m [33m WARN[0m [1mshard-manager[0m: [2mtext_generation_launcher[0m[2m:[0m Could not import Flash Attention enabled models
+Traceback (most recent call last):
+  File "/fsx/home-louis/autocrit/autocrit/inference/text_generation_inference/venv/bin/text-generation-server", line 8, in <module>
+    sys.exit(app())
+  File "/fsx/home-louis/autocrit/autocrit/inference/text_generation_inference/venv/lib/python3.9/site-packages/typer/main.py", line 311, in __call__
+    return get_command(self)(*args, **kwargs)
+  File "/fsx/home-louis/autocrit/autocrit/inference/text_generation_inference/venv/lib/python3.9/site-packages/click/core.py", line 1130, in __call__
+    return self.main(*args, **kwargs)
+  File "/fsx/home-louis/autocrit/autocrit/inference/text_generation_inference/venv/lib/python3.9/site-packages/typer/core.py", line 778, in main
+    return _main(
+  File "/fsx/home-louis/autocrit/autocrit/inference/text_generation_inference/venv/lib/python3.9/site-packages/typer/core.py", line 216, in _main
+    rv = self.invoke(ctx)
+  File "/fsx/home-louis/autocrit/autocrit/inference/text_generation_inference/venv/lib/python3.9/site-packages/click/core.py", line 1657, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+  File "/fsx/home-louis/autocrit/autocrit/inference/text_generation_inference/venv/lib/python3.9/site-packages/click/core.py", line 1404, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+  File "/fsx/home-louis/autocrit/autocrit/inference/text_generation_inference/venv/lib/python3.9/site-packages/click/core.py", line 760, in invoke
+    return __callback(*args, **kwargs)
+  File "/fsx/home-louis/autocrit/autocrit/inference/text_generation_inference/venv/lib/python3.9/site-packages/typer/main.py", line 683, in wrapper
+    return callback(**use_params)  # type: ignore
+  File "/fsx/home-louis/autocrit/autocrit/inference/text_generation_inference/text-generation-inference/server/text_generation_server/cli.py", line 58, in serve
+    from text_generation_server import server
+  File "<frozen importlib._bootstrap>", line 1058, in _handle_fromlist
+  File "<frozen importlib._bootstrap>", line 228, in _call_with_frames_removed
+  File "<frozen importlib._bootstrap>", line 1007, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 986, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 680, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 850, in exec_module
+  File "<frozen importlib._bootstrap>", line 228, in _call_with_frames_removed
+  File "/fsx/home-louis/autocrit/autocrit/inference/text_generation_inference/text-generation-inference/server/text_generation_server/server.py", line 12, in <module>
+    from text_generation_server.cache import Cache
+  File "<frozen importlib._bootstrap>", line 1007, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 986, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 680, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 850, in exec_module
+  File "<frozen importlib._bootstrap>", line 228, in _call_with_frames_removed
+  File "/fsx/home-louis/autocrit/autocrit/inference/text_generation_inference/text-generation-inference/server/text_generation_server/cache.py", line 3, in <module>
+    from text_generation_server.models.types import Batch
+  File "<frozen importlib._bootstrap>", line 1007, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 972, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 228, in _call_with_frames_removed
+  File "<frozen importlib._bootstrap>", line 1007, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 986, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 680, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 850, in exec_module
+  File "<frozen importlib._bootstrap>", line 228, in _call_with_frames_removed
+> File "/fsx/home-louis/autocrit/autocrit/inference/text_generation_inference/text-generation-inference/server/text_generation_server/models/__init__.py", line 73, in <module>
+    from text_generation_server.models.flash_rw import FlashRWSharded
+  File "/fsx/home-louis/autocrit/autocrit/inference/text_generation_inference/text-generation-inference/server/text_generation_server/models/flash_rw.py", line 9, in <module>
+    from text_generation_server.models.custom_modeling.flash_rw_modeling import (
+  File "/fsx/home-louis/autocrit/autocrit/inference/text_generation_inference/text-generation-inference/server/text_generation_server/models/custom_modeling/flash_rw_modeling.py", line 10, in <module>
+    import flash_attn_cuda
+ModuleNotFoundError: No module named 'flash_attn_cuda'
+ [2m[3mrank[0m[2m=[0m0[0m
+[2m2023-07-03T10:28:12.074421Z[0m [32m INFO[0m [2mtext_generation_launcher[0m[2m:[0m Waiting for shard 0 to be ready...
+[2m2023-07-03T10:28:22.082729Z[0m [32m INFO[0m [2mtext_generation_launcher[0m[2m:[0m Waiting for shard 0 to be ready...
+[2m2023-07-03T10:28:25.014866Z[0m [32m INFO[0m [1mshard-manager[0m: [2mtext_generation_launcher[0m[2m:[0m Server started at unix:///tmp/text-generation-server-0
+ [2m[3mrank[0m[2m=[0m0[0m
+[2m2023-07-03T10:28:25.086239Z[0m [32m INFO[0m [2mtext_generation_launcher[0m[2m:[0m Shard 0 ready in 33.028556242s
+[2m2023-07-03T10:28:25.184678Z[0m [32m INFO[0m [2mtext_generation_launcher[0m[2m:[0m Starting Webserver
+[2m2023-07-03T10:28:25.970279Z[0m [32m INFO[0m [2mtext_generation_router[0m[2m:[0m [2mrouter/src/main.rs[0m[2m:[0m[2m193:[0m Connected

@@ -170,11 +170,6 @@ class TextGenerationHook(InferenceHook):
     def __init__(self, dir : str):
         super().__init__(dir)
         self.model_name = dir
-        if tokenizer_name is None:
-            self.tokenizer_name = dir
-        else:
-            self.tokenizer_name = tokenizer_name
-
         self.client = None
 
     def load(self, **kwargs):
@@ -183,7 +178,7 @@ class TextGenerationHook(InferenceHook):
         port = kwargs.get("port", 8080)
 
         # check if model name is a URL
-            if not self.model_name.startswith("http"):
+        if not self.model_name.startswith("http"):
             # launch the model using the model name and text_generation_launcher.sh
             # The following line runs the launcher script
             output = subprocess.run(["sbatch./launch.sbatch MODEL_NAME="+str(self.model_name) + " NUM_SHARD="+str(num_shards) + " PORT="+str(port)], capture_output=True)
@@ -211,7 +206,7 @@ class TextGenerationHook(InferenceHook):
             self.client = Client(f"http://{ip}:{port}")
         else:
             self.client = Client(self.model_name)
-                
+
     def infer(self, input_texts : List[str], 
               generate_params : Dict[str, Any], 
               **kwargs: Any) -> Any:
@@ -221,7 +216,11 @@ class TextGenerationHook(InferenceHook):
         kwargs: any additional arguments to pass to the generate function
         returns: a list of strings, each string is a generated output
         """
+        # if input_texts is a list, convert it to a string
+        if isinstance(input_texts, list):
+            input_texts = input_texts[0]
 
         # use self.client to call the model
-        output_txt = self.client.generate(input_texts, **generate_params).tokens.text
+        output_txt = self.client.generate(input_texts, **generate_params).generated_text
+        #print(output_txt)
         return output_txt
