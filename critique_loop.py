@@ -16,18 +16,17 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from itertools import cycle, islice
 
-
 parser = argparse.ArgumentParser()
-parser.add_argument("--data_path", type=str, default="red-team-prompts-eval.jsonl")
+parser.add_argument("--data_path", type=str, default="red-team-generations/red-team-prompts-eval.jsonl")
 parser.add_argument("--model_path", type=str, default="lmsys/vicuna-7b-v1.3")
 parser.add_argument("--max_new_tokens", type=int, default=512)
 parser.add_argument("--batch_size", type=int, default=1)
-parser.add_argument("--critique", action="store_true")
+parser.add_argument("--only_eval", action="store_true")
 args = parser.parse_args()
 
 from rich.console import Console
 
-console = Console(width=60)
+console = Console(width=80)
 print = console.print
 
 def generate_openai(user_prompt, system_prompt=""):
@@ -165,7 +164,7 @@ if __name__ == '__main__':
     all_samples = []
 
     for batch in tqdm(dataloader, disable=not accelerator.is_main_process):
-        if not args.critique:
+        if args.only_eval:
             for ix in range(len(batch["prompt"])):
                 batch["prompt"][ix] = "USER: " + batch["prompt"][ix] + " ASSISTANT:"
 
@@ -203,22 +202,19 @@ if __name__ == '__main__':
     if accelerator.is_main_process:
         all_samples = list({x["prompt"]: x for x in sum(all_samples, [])}.values())
 
-        if args.critique:
-            question_answers = [(x['prompt'], x['output'][-1]["answer"]) for x in all_samples]
-        else:
+        if args.only_eval:
             question_answers = [(x['prompt'], x['output']) for x in all_samples]
+        else:
+            question_answers = [(x['prompt'], x['output'][-1]["answer"]) for x in all_samples]
 
         evaluations = evaluate_unsafe(question_answers)
-        with open("artifacts/evaluations.json", "w") as f:
-            json.dump(evaluations, f, indent=2)
-
         for sample, evaluation in zip(all_samples, evaluations):
             sample["is_safe"] = evaluation["is_safe"]
 
         data_name = args.data_path.split("/")[-1].split(".")[0]
         model_name = args.model_path.split("/")[-1]
         os.makedirs("artifacts", exist_ok=True)
-        suffix = "-critique" if args.critique else ""
+        suffix = "-critique" if not args.only_eval else ""
         output_path = f"artifacts/{model_name}-{data_name}-l{len(all_samples)}{suffix}.jsonl"
         accelerator.print(f"Writing outputs to {output_path}")
         with open(output_path, "w") as f:
