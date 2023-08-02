@@ -131,3 +131,6 @@ It turned out pretty well, here are some examples:
     "Hi Terry, I'm Ramsey."
 ]
 ```
+
+the generation for these is similar to the above, but with 
+```generate_continuations_for_testing.py``` and ```generate_bad_continuations_for_testing.py```
