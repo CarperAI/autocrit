@@ -45,6 +45,6 @@ ax.tick_params(top=False, labeltop=False, bottom=False, labelbottom=True, left=F
 ax.set_facecolor("#fff")
 ax.set_title(f"StableBeluga-7B on advbench/harmful_behaviors:eval", size=26, y=1.08, fontdict={"fontweight": "normal"})
 ax.set_ylabel("% unsafe generations", size=26)
-pyplot.savefig("artifacts/unsafe.png", dpi=120, bbox_inches="tight")
+pyplot.savefig("artifacts/unsafe.png", dpi=120)
 
 ;
