@@ -19,29 +19,29 @@ print = console.print
 print0 = lambda *args, **kwargs: print(*args, **kwargs) if os.environ.get("RANK", "0") == "0" else None
 
 @torch.inference_mode()
-def generate(model, tokenizer, user_prompts, temperature=1, max_new_tokens=256, max_length=4096, stop=[]):
-    inputs = tokenizer(user_prompts, return_tensors="pt", padding=True, truncation=True, max_length=max_length).to(model.device)
+def generate(model, tokenizer, prompts, temperature=1, max_new_tokens=256, max_length=2048, stop=[]):
+    inputs = tokenizer(prompts, return_tensors="pt", padding=True, truncation=True, max_length=max_length).to(model.device)
     all_ids = model.generate(**inputs, temperature=temperature, max_new_tokens=max_new_tokens, do_sample=True, use_cache=True,
                              pad_token_id=tokenizer.pad_token_id, eos_token_id=tokenizer.eos_token_id)
     output_ids = all_ids[:, inputs.input_ids.shape[1]:]
     outputs = tokenizer.batch_decode(output_ids, skip_special_tokens=True)
 
     for i in range(len(outputs)):
-        for stop_sequence in stop:
-            if stop_sequence in outputs[i]:
-                outputs[i] = outputs[i][:outputs[i].index(stop_sequence)]
+        for s in stop:
+            if s in outputs[i]:
+                outputs[i] = outputs[i][:outputs[i].index(s)]
 
     return outputs
 
-def generate_openai(user_prompt, max_new_tokens=128, system_prompt="", temperature=1, stop=[]):
+def generate_openai(prompt, model="gpt-3.5-turbo", max_new_tokens=128, system_prompt="", temperature=1, stop=[]):
     MAX_API_RETRY = 5
     for _ in range(MAX_API_RETRY):
         try:
             response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
+                model=model,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
+                    {"role": "user", "content": prompt},
                 ],
                 temperature=temperature,
                 max_tokens=max_new_tokens,
@@ -56,21 +56,26 @@ def generate_openai(user_prompt, max_new_tokens=128, system_prompt="", temperatu
 
     raise Exception(f"Failed after {MAX_API_RETRY} retries.")
 
-def critique_loop(prompts, get_answer, get_critique, constitution=[], max_iter=3):
-    dataloader = Accelerator().prepare(DataLoader(prompts))
+def revise(prompts, get_answer, get_critique, constitution=[], max_iterations=3, score_fn=None):
+    accelerator = Accelerator()
+    dataloader = accelerator.prepare(DataLoader(prompts))
     outputs = []
 
-    for (prompt,) in tqdm(dataloader, disable=not Accelerator().is_main_process):
-        context = f"USER: {prompt}"
-        print0(f"USER: {prompt}")
+    stop = ["\nREVISION REQUEST:", "\nCRITIQUE REQUEST:", "\nUSER:", "\nASSISTANT:", "\nREVISION:", "\nCRITIQUE:"]
+    get_answer = truncate_output(get_answer, stop)
+    get_critique = truncate_output(get_critique, stop)
+
+    for (question,) in tqdm(dataloader, disable=not accelerator.is_main_process):
         iterations = []
+        context = f"USER: {question}"
+        print0(context)
 
         if constitution:
-            constitution_iter = islice(cycle(map(lambda x: x.values(), constitution)), max_iter)
+            constitution_iter = islice(cycle(map(lambda x: x.values(), constitution)), max_iterations)
 
-        for i in range(max_iter):
+        for i in range(max_iterations):
             role = "ASSISTANT" if i == 0 else "REVISION"
-            context += f"\n{role}:"
+            context += f"\n{role}: "
             answer = get_answer(context)
             context += answer
             print0(f"{role}: {answer}", style="bold")
@@ -80,7 +85,7 @@ def critique_loop(prompts, get_answer, get_critique, constitution=[], max_iter=3
                 context += f"\nCRITIQUE REQUEST: {critique_request}"
                 print0(f"CRITIQUE REQUEST: {critique_request}")
 
-            context += "\nCRITIQUE:"
+            context += "\nCRITIQUE: "
             critique = get_critique(context)
             context += critique
             print0(f"CRITIQUE: {critique}", style="italic")
@@ -89,11 +94,17 @@ def critique_loop(prompts, get_answer, get_critique, constitution=[], max_iter=3
                 context += f"\nREVISION REQUEST: {revision_request}"
                 print0(f"REVISION REQUEST: {revision_request}")
 
-            iterations.append((context, answer, critique))
+            if score_fn:
+                score = score_fn(question=question, answer=answer)
+                print0(f"SCORE: {score}", style="blue")
+            else:
+                score = None
+
+            iterations.append((answer, critique, score, context))
 
         outputs.append({
-            "prompt": prompt,
-            "iterations": [{"context": context, "answer": answer, "critique": critique} for context, answer, critique in iterations]
+            "question": question,
+            "iterations": [{"answer": answer, "critique": critique, "score": score, "context": context} for answer, critique, score, context in iterations]
         })
 
     return gather(outputs, total_size=len(prompts))
@@ -106,12 +117,20 @@ def gather(samples, total_size: int):
     torch.distributed.all_gather_object(all_samples, samples)
     return sum(all_samples, [])[:total_size]
 
-def finetune(model, tokenizer, prompts, outputs, eval_prompts=[]):
-    accelerator = Accelerator()
+def truncate_output(generate_fn, stop=[]):
+    def fn(*args, **kwargs):
+        output = generate_fn(*args, **kwargs)
 
+        for s in stop:
+            if s in output:
+                output = output[:output.index(s)]
+        return output
+    return fn
+
+def finetune(accelerator, model, tokenizer, optim, prompts, outputs, eval_prompts=[]):
     samples = []
     for prompt, output in zip(prompts, outputs):
-        tokenized = tokenizer([prompt, output])
+        tokenized = tokenizer([prompt.strip(), output.strip()])
         labels = tokenized.input_ids.copy()
         labels[0] = [-100] * len(labels[0])
         samples.append({
@@ -120,38 +139,20 @@ def finetune(model, tokenizer, prompts, outputs, eval_prompts=[]):
             "labels": sum(labels, []),
         })
 
-    dataloader = DataLoader(samples, shuffle=True, collate_fn=DataCollatorWithPadding(tokenizer))
-    eval_dataloader = DataLoader(eval_prompts, shuffle=False)
-    opt = torch.optim.AdamW(model.parameters(), lr=1e-5, betas=(0.9, 0.99))
-    model, opt, dataloader, eval_dataloader = accelerator.prepare(model, opt, dataloader, eval_dataloader)
+    dataloader = accelerator.prepare(DataLoader(samples, shuffle=True, collate_fn=DataCollatorWithPadding(tokenizer)))
 
-    i = 0
-    epochs = 1
+    epochs = 4
     total_steps = epochs * len(dataloader)
-    eval_every = total_steps
     tbar = trange(total_steps, disable=not accelerator.is_main_process)
     for epoch in range(epochs):
         for batch in dataloader:
-            if i % eval_every == 0 or i == total_steps - 1:
-                model.eval()
-                outputs = []
-                for eval_prompts in tqdm(eval_dataloader, disable=not accelerator.is_main_process):
-                    outputs.extend(generate(accelerator.unwrap_model(model), tokenizer, eval_prompts))
-
-                outputs = gather(outputs, len(eval_prompts))
-
-                for output in outputs:
-                    print(f"{'*' * 80}{output}")
-                model.train()
-
             with accelerator.accumulate(model):
                 loss = model(**batch).loss
                 accelerator.backward(loss)
-                opt.step()
-                opt.zero_grad()
+                optim.step()
+                optim.zero_grad()
 
             loss_global = accelerator.reduce(loss, "mean")
             tbar.set_description(f"loss: {loss_global.item():g}")
-            i += 1
             tbar.update()
 
