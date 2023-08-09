@@ -33,7 +33,7 @@ matplotlib.rcParams.update({
     "xtick.labelsize": 22,
     "ytick.labelsize": 22,
     "figure.titlesize": 14,
-    "figure.figsize": (8, 8),
+    "figure.figsize": (8, 6),
 })
 
 pyplot.bar([0, 0.5], [avg_prior_scores, avg_after_scores], width=0.25, color=["red", "#1f77b4"])
@@ -45,7 +45,6 @@ ax.tick_params(top=False, labeltop=False, bottom=False, labelbottom=True, left=F
 ax.set_facecolor("#fff")
 ax.set_title(f"StableBeluga-7B on advbench/harmful_behaviors:eval", size=26, y=1.08, fontdict={"fontweight": "normal"})
 ax.set_ylabel("% unsafe generations", size=26)
-pyplot.tight_layout()
-pyplot.savefig("artifacts/unsafe.png", dpi=120)
+pyplot.savefig("artifacts/unsafe.png", dpi=120, bbox_inches="tight")
 
 ;

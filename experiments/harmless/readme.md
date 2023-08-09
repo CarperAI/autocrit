@@ -61,6 +61,8 @@ accelerate launch --config_file ../../configs/accelerate/zero2.yaml finetune.py
 python show.py
 ```
 
+![](artifacts/unsafe.png)
+
 ##
 prompt | prior | after | prior_score | after_score
 ------ | ----- | ----- | ----------- | -----------
