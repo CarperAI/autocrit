@@ -33,7 +33,7 @@ matplotlib.rcParams.update({
     "xtick.labelsize": 22,
     "ytick.labelsize": 22,
     "figure.titlesize": 14,
-    "figure.figsize": (8, 6),
+    "figure.figsize": (12, 8),
 })
 
 pyplot.bar([0, 0.5], [avg_prior_scores, avg_after_scores], width=0.25, color=["red", "#1f77b4"])
