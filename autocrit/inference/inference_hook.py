@@ -1,3 +1,11 @@
+import aiohttp
+import asyncio
+import json
+import subprocess
+import torch
+import time
+from tqdm.asyncio import tqdm_asyncio
+
 import argparse
 import os
 import torch
@@ -6,7 +14,7 @@ from typing import Tuple, Any, Optional, List, Dict
 import tritonclient.grpc.aio as grpcclient
 from autocrit.inference.utils import triton_call, best_of_n
 from text_generation import Client
-import logging  
+import logging
 
 '''
 We're using inference hooks rather than directly using hugging face generate incase we want to switch to a triton client at some point.
@@ -20,13 +28,13 @@ class InferenceHook:
         self.dir = dir
         self.API_KEY = ""
         self.API_URL = ""
-    
+
     def load(self, **kwargs):
         pass
 
     # Calls the inference API and returns the result
-    def infer(self, input_texts : List[str], 
-              generate_params : Dict[str, Any], 
+    def infer(self, input_texts : List[str],
+              generate_params : Dict[str, Any],
               **kwargs: Any) -> Any:
         """
         input_texts: a list of strings, each string is a prompt
@@ -35,7 +43,62 @@ class InferenceHook:
         """
         pass
 
+class VLLMHook:
+    def __init__(self, model_path, tensor_parallel_size=1):
+        self.data_parallel_size = torch.cuda.device_count() // tensor_parallel_size
+        self.tensor_parallel_size = tensor_parallel_size
 
+        devices = list(map(str, range(torch.cuda.device_count())))
+        devices = [",".join(devices[i:i+tensor_parallel_size]) for i in range(self.data_parallel_size)]
+
+        self.processes = []
+        for i in range(self.data_parallel_size):
+            cmd = f"python -m vllm.entrypoints.api_server -tp={tensor_parallel_size} --model={model_path} --port {8000+i}"
+            process = subprocess.Popen(cmd.split(), env={**os.environ, "CUDA_VISIBLE_DEVICES": devices[i]})
+            self.processes.append(process)
+
+        while True:
+            all_loaded = True
+            try:
+                asyncio.run(self.request_vllm_api(prompt="", port=8000 + self.data_parallel_size-1))
+            except aiohttp.client_exceptions.ClientConnectorError:
+                all_loaded = False
+
+            if all_loaded:
+                break
+
+            time.sleep(1)
+
+    async def request_vllm_api(self, prompt: str, i = 0, port=8000, n=1, temperature=0.0, max_new_tokens=512, stop=[]):
+        pload = {
+            "prompt": prompt,
+            "n": n,
+            "temperature": temperature,
+            "max_tokens": max_new_tokens,
+            "stop": stop,
+            "stream": False,
+        }
+
+        connector = aiohttp.TCPConnector(limit_per_host=1024)
+        timeout = aiohttp.ClientTimeout(total=9000)
+        async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
+            async with session.post(f"http://localhost:{port}/generate", json=pload) as response:
+                try:
+                    data = await response.json()
+                    return {"id": i, "prompt": prompt, "output": [x[len(prompt):] for x in data["text"]]}
+                except aiohttp.client.ContentTypeError:
+                    return {"id": i, "prompt": prompt, "output": [None]}
+
+    def generate(self, prompts, **kwargs):
+        async def generate_vllm_api(prompts, **kwargs):
+            outputs = [self.request_vllm_api(prompt, i=i, **kwargs, port=8000 + i % self.data_parallel_size) for i, prompt in enumerate(prompts)]
+            return await tqdm_asyncio.gather(*outputs)
+
+        return asyncio.run(generate_vllm_api(prompts, **kwargs))
+
+    def __del__(self):
+        for p in self.processes:
+            p.kill()
 
 
 # Inference hook that uses the HuggingFace API to call a model
@@ -64,8 +127,8 @@ class HuggingFaceHook(InferenceHook):
         if self.tokenizer.pad_token is None:
             self.tokenizer.add_special_tokens({"pad_token": "[PAD]"})
 
-    def infer(self, input_texts : List[str], 
-              generate_params : Dict[str, Any], 
+    def infer(self, input_texts : List[str],
+              generate_params : Dict[str, Any],
               **kwargs: Any) -> Any:
         """
         input_texts: a list of strings, each string is a prompt
@@ -96,8 +159,8 @@ class HuggingFaceHookBestOfN(HuggingFaceHook):
         """
         super().__init__(dir, tokenizer_name)
 
-    def infer(self, input_texts : List[str], 
-              generate_params : Dict[str, Any], 
+    def infer(self, input_texts : List[str],
+              generate_params : Dict[str, Any],
               **kwargs: Any) -> Any:
         """
         input_texts: a list of strings, each string is a prompt
@@ -123,7 +186,7 @@ class TritonHook(InferenceHook):
         self.model_name = model_name
         if tokenizer_name is None:
             self.tokenizer_name = model_name
-        else:   
+        else:
             self.tokenizer_name = tokenizer_name
 
         self.client = None
@@ -138,8 +201,8 @@ class TritonHook(InferenceHook):
             self.tokenizer.add_special_tokens({"pad_token": "[PAD]"})
 
 
-    def infer(self, input_texts : List[str], 
-              generate_params : Dict[str, Any], 
+    def infer(self, input_texts : List[str],
+              generate_params : Dict[str, Any],
               **kwargs: Any) -> Any:
         """
         input_texts: a list of strings, each string is a prompt
@@ -163,7 +226,7 @@ class TritonHook(InferenceHook):
             return output_txt, logits
         else:
             return output_txt
-    
+
 
 # Inference hook that uses the HuggingFace API to call a model
 class TextGenerationHook(InferenceHook):
@@ -187,7 +250,7 @@ class TextGenerationHook(InferenceHook):
             if output.returncode != 0:
                 logging.log(logging.ERROR, output.stderr.decode("utf-8"))
                 raise RuntimeError("Failed to launch model")
-            else: 
+            else:
                 logging.info("Model launched successfully.")
 
             # get the job id from the output
@@ -207,8 +270,8 @@ class TextGenerationHook(InferenceHook):
         else:
             self.client = Client(self.model_name)
 
-    def infer(self, input_texts : List[str], 
-              generate_params : Dict[str, Any], 
+    def infer(self, input_texts : List[str],
+              generate_params : Dict[str, Any],
               **kwargs: Any) -> Any:
         """
         input_texts: a list of strings, each string is a prompt
