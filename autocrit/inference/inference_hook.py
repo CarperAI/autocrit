@@ -43,7 +43,7 @@ class InferenceHook:
         """
         pass
 
-class VLLMHook:
+class vLLMHook:
     def __init__(self, model_path, tensor_parallel_size=1):
         self.data_parallel_size = torch.cuda.device_count() // tensor_parallel_size
         self.tensor_parallel_size = tensor_parallel_size

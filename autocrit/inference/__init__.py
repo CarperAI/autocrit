@@ -1,1 +1,1 @@
-from .inference_hook import VLLMHook
+from .inference_hook import vLLMHook
