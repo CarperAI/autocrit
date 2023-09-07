@@ -1,1 +1,1 @@
-from .inference_hook import vLLMHook
+from .inference_hook import vLLMHook, HuggingFaceHook
