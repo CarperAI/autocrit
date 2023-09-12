@@ -18,99 +18,151 @@ from autocrit.inference.utils import triton_call, best_of_n
 from text_generation import Client
 import logging
 
-'''
-We're using inference hooks rather than directly using hugging face generate incase we want to switch to a triton client at some point.
-This gives us significantly improved flexibility, as autocrit is not built around a single inference API
-'''
+import signal
+import sys
 
 
 class InferenceHook(ABC):
     def __init__(self, **kwargs):
         """
-        kwargs: a dictionary of parameters to pass to initilize the model
+        kwargs: a dictionary of parameters to initilize the model
         """
         pass
 
     @abstractmethod
     def generate(self, prompts: List[str], **kwargs: Dict[str, Any]):
         """
-        prompts: a list of strings, each string is a prompt
-        kwargs: a dictionary of parameters to pass to the generate function
+        prompts: inputs for generations
+        kwargs: parameters to control generation
         """
         pass
 
     @abstractmethod
-    def unload(self):
+    def free(self):
+        """
+        Clean up resources after inference
+        """
         pass
 
 class vLLMHook(InferenceHook):
-    def __init__(self, model_path, tensor_parallel_size=1):
+    def __init__(self, model_path, tensor_parallel_size=1, external=False, num_nodes=1):
         self.model_path = model_path
         self.tensor_parallel_size = tensor_parallel_size
-        self.data_parallel_size = torch.cuda.device_count() // tensor_parallel_size
+        self.external = external
         self.nth_request = 0
 
         devices = list(map(str, range(torch.cuda.device_count())))
-        devices = [",".join(devices[i*tensor_parallel_size:(i+1)*tensor_parallel_size]) for i in range(self.data_parallel_size)]
+        devices = [",".join(devices[i*tensor_parallel_size:(i+1)*tensor_parallel_size]) for i in range(len(devices) // tensor_parallel_size)]
 
-        self.processes = []
-        for i in range(self.data_parallel_size):
-            cmd = f"python -m vllm.entrypoints.api_server -tp={tensor_parallel_size} --model={model_path} --port {8000+i}"
-            process = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, env={**os.environ, "CUDA_VISIBLE_DEVICES": devices[i]})
-            self.processes.append(process)
+        if external:
+            self.job_ids = []
+            self.servers = []
+            self.data_parallel_size = torch.cuda.device_count() * num_nodes // tensor_parallel_size
 
-        print(f"Loading {self.data_parallel_size} processes for {model_path}...")
+            sbatch_script_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "vllm.sbatch")
+            for _ in range(num_nodes):
+                cmd = f"sbatch {sbatch_script_path} NUM_TP={tensor_parallel_size} MODEL_PATH={model_path} DEVICES={'.'.join(devices)}"
+                print(f'{cmd=}')
+                process = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+                while True:
+                    output = process.stdout.readline().decode("utf-8").strip()
+                    if output == '' and process.poll() is not None:
+                        break
+                    if output:
+                        print(output)
+                        if output.startswith("Submitted batch job"):
+                            self.job_ids.append(output.split()[-1].strip())
+
+                while not os.path.exists(f"{self.job_ids[-1]}"):
+                    time.sleep(1)
+
+                with open(f"{self.job_ids[-1]}") as log:
+                    while True:
+                        output = log.readline().strip()
+                        if output:
+                            print(output)
+                            if output.startswith("HOSTNAME="):
+                                hostname = output.split("=")[-1].strip()
+                                self.servers.extend([f"{hostname}:{8000+i}" for i in range(8 // tensor_parallel_size)])
+                                break
+
+        else:
+            self.data_parallel_size = torch.cuda.device_count() // tensor_parallel_size
+            self.servers = [f"localhost:{8000+i}" for i in range(self.data_parallel_size)]
+            self.processes = []
+            for i in range(self.data_parallel_size):
+                cmd = f"python -m vllm.entrypoints.api_server -tp={tensor_parallel_size} --model={model_path} --port {8000+i}"
+                process = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, env={**os.environ, "CUDA_VISIBLE_DEVICES": devices[i], "TORCHELASTIC_USE_AGENT_STORE": ""})
+                self.processes.append(process)
+
+            print(f"Loading {self.data_parallel_size} processes for {model_path}...")
 
         while True:
             all_loaded = True
-            try:
-                asyncio.run(self.request_vllm_api(prompt=""))
-            except aiohttp.client_exceptions.ClientConnectorError:
-                all_loaded = False
+            for server in self.servers:
+                try:
+                    asyncio.run(self.request_vllm_api(server=server, prompt="", max_new_tokens=1))
+                except aiohttp.client_exceptions.ClientConnectorError:
+                    all_loaded = False
+                    break
 
             if all_loaded:
                 print(f"Loaded {model_path}")
-                time.sleep(5)
+                time.sleep(10)
                 break
 
             time.sleep(1)
 
-    async def request_vllm_api(self, prompt: str, i=0, n=1, temperature=0.0, max_new_tokens=512, stop=[]):
+    async def request_vllm_api(self, prompt: str, i=0, num_return_sequences=1, temperature=0.0, max_new_tokens=512, stop=[], server=None):
         pload = {
             "prompt": prompt,
-            "n": n,
+            "n": num_return_sequences,
             "temperature": temperature,
             "max_tokens": max_new_tokens,
             "stop": stop,
             "stream": False,
         }
 
-        port = 8000 + self.nth_request % self.data_parallel_size
-        self.nth_request += 1
-        connector = aiohttp.TCPConnector(limit_per_host=1024)
-        timeout = aiohttp.ClientTimeout(total=9000)
+        if server is None:
+            server = self.servers[self.nth_request % self.data_parallel_size]
+            self.nth_request += 1
+
+        connector = aiohttp.TCPConnector(limit_per_host=8192 * 4)
+        timeout = aiohttp.ClientTimeout(total=60*60)
         async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
-            async with session.post(f"http://localhost:{port}/generate", json=pload) as response:
+            async with session.post(f"http://{server}/generate", json=pload) as response:
                 try:
                     data = await response.json()
-                    return {"id": i, "prompt": prompt, "output": [x[len(prompt):] for x in data["text"]]}
+                    return {"id": i, "prompt": prompt, "outputs": [x[len(prompt):] for x in data["text"]]}
                 except aiohttp.client.ContentTypeError:
-                    return {"id": i, "prompt": prompt, "output": [None]}
+                    return {"id": i, "prompt": prompt, "outputs": [None]}
 
 
     def generate(self, prompts, **kwargs):
         async def generate_vllm_api(prompts, **kwargs):
-            outputs = [self.request_vllm_api(prompt, i=i, **kwargs) for i, prompt in enumerate(prompts)]
+            outputs = [self.request_vllm_api(prompt=prompt, i=i, **kwargs) for i, prompt in enumerate(prompts)]
             return await tqdm_asyncio.gather(*outputs, desc=f"Inferencing {self.model_path}")
 
-        return asyncio.run(generate_vllm_api(prompts, **kwargs))
+        batch_size = 8192
+        outputs = []
+        for i in range(0, len(prompts), batch_size):
+            outputs += asyncio.run(generate_vllm_api(prompts[i:i+batch_size], **kwargs))
 
-    def unload(self):
-        for p in self.processes:
-            os.kill(p.pid, signal.SIGKILL)
-            p.communicate()
-        print(f"Offloaded all {self.model_path} processes")
+        return outputs
 
+    def free(self):
+        if self.external:
+            subprocess.run(f"scancel {' '.join(self.job_ids)}".split())
+        else:
+            for p in self.processes:
+                os.kill(p.pid, signal.SIGTERM)
+                p.communicate()
+            print(f"Unloaded all {self.model_path} processes")
+            time.sleep(10)
+
+    def __del__(self):
+        self.free()
 
 # Inference hook that uses the HuggingFace API to call a model
 class HuggingFaceHook(InferenceHook):
@@ -134,14 +186,18 @@ class HuggingFaceHook(InferenceHook):
 
         outputs = self.tokenizer.batch_decode(output_ids, skip_special_tokens=True)
 
+
         for i in range(len(outputs)):
             for s in stop:
                 if s in outputs[i]:
                     outputs[i] = outputs[i][:outputs[i].index(s)]
 
+        num_return_sequences = kwargs.get("num_return_sequences", 1)
+        outputs = [{"id": i, "prompt": p, "outputs": outputs[i*num_return_sequences:(i+1)*num_return_sequences]} for i, p in enumerate(prompts)]
+
         return outputs
 
-    def unload(self):
+    def free(self):
         del self.model
         del self.tokenizer
 
