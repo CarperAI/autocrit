@@ -46,6 +46,7 @@ class InferenceHook(ABC):
 
 class vLLMHook(InferenceHook):
     def __init__(self, model_path, tensor_parallel_size=1, external=False, num_nodes=1):
+        self.init_time = time.time()
         self.model_path = model_path
         self.tensor_parallel_size = tensor_parallel_size
         self.external = external
@@ -61,9 +62,9 @@ class vLLMHook(InferenceHook):
 
             sbatch_script_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "vllm.sbatch")
             for _ in range(num_nodes):
-                cmd = f"sbatch {sbatch_script_path} NUM_TP={tensor_parallel_size} MODEL_PATH={model_path} DEVICES={'.'.join(devices)}"
+                cmd = f"sbatch {sbatch_script_path} NUM_TP={tensor_parallel_size} MODEL_PATH={model_path} DEVICES={'|'.join(devices)}"
                 print(f'{cmd=}')
-                process = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                process = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, env={**os.environ, "TORCHELASTIC_USE_AGENT_STORE": ""})
 
                 while True:
                     output = process.stdout.readline().decode("utf-8").strip()
@@ -98,21 +99,19 @@ class vLLMHook(InferenceHook):
 
             print(f"Loading {self.data_parallel_size} processes for {model_path}...")
 
-        while True:
-            all_loaded = True
-            for server in self.servers:
+        not_loaded = list(self.servers)
+        while not_loaded:
+            for server in not_loaded:
                 try:
                     asyncio.run(self.request_vllm_api(server=server, prompt="", max_new_tokens=1))
+                    not_loaded.remove(server)
                 except aiohttp.client_exceptions.ClientConnectorError:
-                    all_loaded = False
                     break
 
-            if all_loaded:
-                print(f"Loaded {model_path}")
-                time.sleep(10)
-                break
-
             time.sleep(1)
+
+        self.load_time = time.time() - self.init_time
+        print(f"Loaded {model_path} in {self.load_time:.0f}s")
 
     async def request_vllm_api(self, prompt: str, i=0, num_return_sequences=1, temperature=0.0, max_new_tokens=512, stop=[], server=None):
         pload = {
@@ -128,8 +127,8 @@ class vLLMHook(InferenceHook):
             server = self.servers[self.nth_request % self.data_parallel_size]
             self.nth_request += 1
 
-        connector = aiohttp.TCPConnector(limit_per_host=8192 * 4)
-        timeout = aiohttp.ClientTimeout(total=60*60)
+        connector = aiohttp.TCPConnector(limit_per_host=32768)
+        timeout = aiohttp.ClientTimeout(total=3600)
         async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
             async with session.post(f"http://{server}/generate", json=pload) as response:
                 try:
@@ -144,7 +143,7 @@ class vLLMHook(InferenceHook):
             outputs = [self.request_vllm_api(prompt=prompt, i=i, **kwargs) for i, prompt in enumerate(prompts)]
             return await tqdm_asyncio.gather(*outputs, desc=f"Inferencing {self.model_path}")
 
-        batch_size = 8192
+        batch_size = 32768
         outputs = []
         for i in range(0, len(prompts), batch_size):
             outputs += asyncio.run(generate_vllm_api(prompts[i:i+batch_size], **kwargs))
@@ -159,7 +158,6 @@ class vLLMHook(InferenceHook):
                 os.kill(p.pid, signal.SIGTERM)
                 p.communicate()
             print(f"Unloaded all {self.model_path} processes")
-            time.sleep(10)
 
     def __del__(self):
         self.free()
