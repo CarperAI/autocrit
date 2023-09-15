@@ -71,7 +71,7 @@ class vLLMHook(InferenceHook):
         if num_external_nodes:
             self.job_ids = []
             self.servers = []
-            self.data_parallel_size = torch.cuda.device_count() * num_nodes // tensor_parallel_size
+            self.data_parallel_size = torch.cuda.device_count() * num_external_nodes // tensor_parallel_size
 
             sbatch_script_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "vllm.sbatch")
             for _ in range(num_external_nodes):
