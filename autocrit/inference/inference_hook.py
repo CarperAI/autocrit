@@ -50,33 +50,33 @@ class InferenceHook(ABC):
         pass
 
 class vLLMHook(InferenceHook):
-    def __init__(self, model_path, tensor_parallel_size=1, external=False, num_nodes=1):
+    def __init__(self, model_path, tensor_parallel_size=1, num_external_nodes=0):
         """
+        Starts data parallel vLLM servers either locally or on separate nodes by spawning slurm jobs
 
         Args:
             model_path (`str`): the path to the model
             tensor_parallel_size (`int`): the number of GPUs to use per one server
-            external (`bool`): whether to spawn a new slurm jobs and generate on external nodes or use the current node
-            num_nodes (`int`): the number of nodes to use if external is True
+            num_external_nodes (`int`): spawn this many slurm jobs for the servers, if `0`, use only local resourses
         """
         self.init_time = time.time()
         self.model_path = model_path
         self.tensor_parallel_size = tensor_parallel_size
-        self.external = external
+        self.num_external_nodes = num_external_nodes
         self.nth_request = 0
 
         devices = list(map(str, range(torch.cuda.device_count())))
         devices = [",".join(devices[i*tensor_parallel_size:(i+1)*tensor_parallel_size]) for i in range(len(devices) // tensor_parallel_size)]
 
-        if external:
+        if num_external_nodes:
             self.job_ids = []
             self.servers = []
             self.data_parallel_size = torch.cuda.device_count() * num_nodes // tensor_parallel_size
 
             sbatch_script_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "vllm.sbatch")
-            for _ in range(num_nodes):
+            for _ in range(num_external_nodes):
                 cmd = f"sbatch {sbatch_script_path} NUM_TP={tensor_parallel_size} MODEL_PATH={model_path} DEVICES={'|'.join(devices)}"
-                process = subprocess.Popen(cmd.split(), env={**os.environ, "TORCHELASTIC_USE_AGENT_STORE": ""})
+                process = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE, env={**os.environ, "TORCHELASTIC_USE_AGENT_STORE": ""})
 
                 while True:
                     output = process.stdout.readline().decode("utf-8").strip()
@@ -120,7 +120,7 @@ class vLLMHook(InferenceHook):
         while not_loaded:
             for server in not_loaded:
                 try:
-                    asyncio.run(self.request_vllm_api(server=server, prompt="", max_new_tokens=1))
+                    asyncio.run(self.request_vllm_api(server=server, prompt=".", max_new_tokens=1))
                     not_loaded.remove(server)
                 except aiohttp.client_exceptions.ClientConnectorError:
                     break
@@ -168,7 +168,7 @@ class vLLMHook(InferenceHook):
         return outputs
 
     def free(self):
-        if self.external:
+        if self.num_external_nodes:
             if self.job_ids:
                 subprocess.run(f"scancel {' '.join(self.job_ids)}".split())
                 self.job_ids = []
