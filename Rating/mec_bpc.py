@@ -101,7 +101,7 @@ def mecpbc_score(systems: Optional[List[str]], prompts: List[str], outputs: List
         if rating[1] is None or mirror_rating[1] is None:
             score = None
         else:
-            score = (rating[-1] + mirror_rating[-1]) / 2
+            score = (rating[-1] - mirror_rating[-1]) / 2
         data.append({"prompt": prompt,
                      "output": output,
                      "critique": rating[0],
