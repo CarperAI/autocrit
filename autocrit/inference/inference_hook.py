@@ -87,10 +87,10 @@ class vLLMHook(InferenceHook):
                         if output.startswith("Submitted batch job"):
                             self.job_ids.append(output.split()[-1].strip())
 
-                while not os.path.exists(f"{self.job_ids[-1]}"):
+                while not os.path.exists(f"vllm_logs/{self.job_ids[-1]}"):
                     time.sleep(1)
 
-                with open(f"{self.job_ids[-1]}") as log:
+                with open(f"vllm_logs/{self.job_ids[-1]}") as log:
                     while True:
                         output = log.readline().strip()
                         if output:
