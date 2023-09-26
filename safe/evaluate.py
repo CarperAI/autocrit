@@ -70,6 +70,7 @@ def evaluate_unsafe(questions, answers):
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--data_path", type=str)
+parser.add_argument("--model_path", type=str)
 args = parser.parse_args(args=[] if "__file__" not in globals() else sys.argv[1:])
 
 with open(args.data_path) as f:
@@ -78,25 +79,46 @@ with open(args.data_path) as f:
     answers = [x["answer"] for x in samples]
 
 # ■ ~ eval with reward model
-model_path = "/admin/home-reciprocate/reward-hh/7b"
-model = AutoModelForSequenceClassification.from_pretrained(model_path)
-tokenizer = AutoTokenizer.from_pretrained(model_path)
-reward_fn = pipeline('text-classification', model=model, tokenizer=tokenizer, truncation=True, device=0, batch_size=32, max_length=2048)
+import torch
+from transformers import PreTrainedModel, AutoConfig, AutoModelForCausalLM
 
-class DatasetList(Dataset):
-    def __init__(self, samples):
-        self.samples = samples
+class ClassificationModel(PreTrainedModel):
+    def __init__(self, model_path):
+        super().__init__(AutoConfig.from_pretrained(model_path, trust_remote_code=True))
+        self.llm = AutoModelForCausalLM.from_pretrained(model_path, trust_remote_code=True).model
+        self.score = torch.nn.Linear(self.config.hidden_size, 1, bias=False)
 
-    def __len__(self):
-        return len(self.samples)
+    def forward(self, input_ids, attention_mask, **kwargs):
+        logits = self.score(self.llm(input_ids, attention_mask=attention_mask, **kwargs)[0])
+        sequence_lengths = (torch.eq(input_ids, self.llm.config.pad_token_id).long().argmax(-1) - 1).to(logits.device)
+        pooled_logits = logits[torch.arange(input_ids.shape[0], device=logits.device), sequence_lengths]
+        return pooled_logits[None]
 
-    def __getitem__(self, idx):
-        return self.samples[idx]
+tokenizer = AutoTokenizer.from_pretrained(args.model_path)
+tokenizer.padding_side = "right"
+tokenizer.truncation_side = "left"
+if tokenizer.pad_token_id is None:
+    tokenizer.add_special_tokens({"pad_token": "<pad>"})
 
-template = "### User: {prompt}\n\n### Assistant:\n{output}</s>"
-outputs = list(tqdm(reward_fn(DatasetList([template.format(prompt=question, output=answer) for question, answer in zip(questions, answers)]))))
-scores = np.array([x['score'] for x in outputs])
-scores = (scores - 0.6816716283619826) / 0.3198637874065531
+model = ClassificationModel(args.model_path)
+model.llm.resize_token_embeddings(len(tokenizer))
+model.llm.config.pad_token_id = tokenizer.pad_token_id
+model.load_state_dict(torch.load(f"{args.model_path}/pytorch_model.bin"))
+model.eval()
+model.to(0)
+
+template = "### User: {prompt}\n\n### Assistant:\n{output}" + tokenizer.eos_token
+prompts = [template.format(prompt=question, output=answer) for question, answer in zip(questions, answers)]
+dataloader = torch.utils.data.DataLoader(prompts, batch_size=8)
+
+scores = []
+for batch in tqdm(dataloader):
+    input = tokenizer(batch, padding=True, return_tensors="pt", truncation=True, max_length=2048)
+    input = {k: v.to(model.device) for k, v in input.items()}
+    with torch.no_grad():
+        outputs = model(**input).flatten()
+        outputs = outputs.cpu().numpy().tolist()
+        scores.extend(outputs)
 
 for sample, score in zip(samples, scores):
     sample["score"] = float(score)
@@ -109,7 +131,7 @@ for sample, is_safe in zip(samples, is_safe):
 # ■ ~
 
 from rich.table import Table
-table = Table(title=f"Output of {{args.model_path.split('/')[-1]}}", show_lines=True)
+table = Table(title=f"Output of {args.data_path.split('/')[-1]}", show_lines=True)
 table.add_column("Question")
 table.add_column("Answer")
 table.add_column("Is safe")
