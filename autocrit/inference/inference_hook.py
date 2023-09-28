@@ -1,3 +1,4 @@
+import math
 import argparse
 import asyncio
 import json
@@ -48,6 +49,10 @@ class InferenceHook(ABC):
         Clean up resources after the inference
         """
         pass
+
+    def __del__(self):
+        self.free()
+
 
 class vLLMHook(InferenceHook):
     def __init__(self, model_path, tensor_parallel_size=1, num_external_nodes=0):
@@ -179,8 +184,84 @@ class vLLMHook(InferenceHook):
             print(f"Unloaded all {self.model_path} processes")
             self.processes = []
 
-    def __del__(self):
-        self.free()
+
+class RewardHook(InferenceHook):
+    def __init__(self, model_path: str):
+        self.init_time = time.time()
+        self.model_path = model_path
+        self.nth_request = 0
+
+        tensor_parallel_size = 1
+        devices = list(map(str, range(torch.cuda.device_count())))
+        devices = [",".join(devices[i*tensor_parallel_size:(i+1)*tensor_parallel_size]) for i in range(len(devices) // tensor_parallel_size)]
+
+        self.data_parallel_size = torch.cuda.device_count() // tensor_parallel_size
+        self.servers = [f"localhost:{8000+i}" for i in range(self.data_parallel_size)]
+        self.processes = []
+        for i in range(self.data_parallel_size):
+            server_script_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "server.py")
+            cmd = f"python {server_script_path} --model {model_path} --port {8000+i}"
+            kwargs = {"env": {**os.environ, "CUDA_VISIBLE_DEVICES": devices[i], "TORCHELASTIC_USE_AGENT_STORE": ""}}
+            if not os.environ.get("DEBUG", False):
+                kwargs["stdout"] = subprocess.DEVNULL
+                kwargs["stderr"] = subprocess.DEVNULL
+
+            process = subprocess.Popen(cmd.split(), **kwargs)
+            self.processes.append(process)
+
+        print(f"Loading {self.data_parallel_size} processes for {model_path}...")
+        not_loaded = list(self.servers)
+        while not_loaded:
+            for server in not_loaded:
+                try:
+                    asyncio.run(self.request_api(server=server, samples=None))
+                    not_loaded.remove(server)
+                except aiohttp.client_exceptions.ClientConnectorError:
+                    break
+
+            time.sleep(1)
+
+    async def request_api(self, samples: List[str], server=None, batch_size=8, max_length=2048):
+        pload = {
+            "samples": samples,
+            "batch_size": batch_size,
+            "max_length": max_length,
+        }
+
+        if server is None:
+            server = self.servers[self.nth_request % self.data_parallel_size]
+            self.nth_request += 1
+
+        connector = aiohttp.TCPConnector(limit_per_host=32768)
+        timeout = aiohttp.ClientTimeout(total=3600)
+        async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
+            async with session.post(f"http://{server}/score", json=pload) as response:
+                try:
+                    data = await response.json()
+                    return data
+                except aiohttp.client.ContentTypeError:
+                    return None
+
+    def score(self, samples: List[str], **kwargs) -> List[Dict[str, Any]]:
+        async def score_async_api(samples, **kwargs):
+            batch_size = math.ceil(len(samples) / self.data_parallel_size)
+            samples_batched = [samples[i*batch_size:(i+1)*batch_size] for i in range(self.data_parallel_size)]
+            outputs = [self.request_api(samples_batched[i], **kwargs) for i in range(self.data_parallel_size)]
+
+            return await tqdm_asyncio.gather(*outputs, desc=f"Inferencing {self.model_path}")
+
+        return sum(asyncio.run(score_async_api(samples, **kwargs)), [])
+
+    def generate(self, prompts: List[str], **kwargs) -> List[Dict[str, Any]]:
+        return self.score(prompts, **kwargs)
+
+    def free(self):
+        for p in self.processes:
+            os.kill(p.pid, signal.SIGTERM)
+            p.communicate()
+        print(f"Unloaded all {self.model_path} processes")
+        self.processes = []
+
 
 class HuggingFaceHook(InferenceHook):
     """
@@ -195,30 +276,34 @@ class HuggingFaceHook(InferenceHook):
         """
         self.model = transformers.AutoModelForCausalLM.from_pretrained(model_path, device_map="auto")
         self.tokenizer = transformers.AutoTokenizer.from_pretrained(tokenizer_path or model_path)
+        self.tokenizer.padding_side = "left"
+        self.tokenizer.truncation_side = "left"
         if self.tokenizer.pad_token is None:
             self.tokenizer.add_special_tokens({"pad_token": "[PAD]"})
 
     @torch.inference_mode()
     def generate(self, prompts: List[str], **kwargs: Any) -> List[str]:
         stop = kwargs.pop("stop", [])
+        max_length = kwargs.get("max_length", 2048)
+        max_new_tokens = kwargs.get("max_new_tokens", 512)
+        temperature = kwargs.get("temperature", 1.0)
+        num_return_sequences = kwargs.get("num_return_sequences", 1)
 
-        inputs = self.tokenizer(prompts, return_tensors="pt", padding=True, truncation=True, max_length=kwargs.get("max_length", 2048)).to(self.model.device)
+        outputs = []
+        for i in range(len(prompts)):
+            inputs = self.tokenizer([prompts[i]], return_tensors="pt", padding=True, truncation=True, max_length=max_length).to(self.model.device)
 
-        all_ids = self.model.generate(**inputs, pad_token_id=self.tokenizer.pad_token_id, eos_token_id=self.tokenizer.eos_token_id, **kwargs)
-        output_ids = all_ids[:, inputs.input_ids.shape[1]:]
+            all_ids = self.model.generate(**inputs, pad_token_id=self.tokenizer.pad_token_id, eos_token_id=self.tokenizer.eos_token_id, max_new_tokens=max_new_tokens, do_sample=temperature > 0, temperature=temperature, num_return_sequences=num_return_sequences)
+            output_ids = all_ids[:, inputs.input_ids.shape[1]:]
+            outputs.extend(output_ids)
 
-        if "no_decode" in kwargs:
-            return output
-
-        outputs = self.tokenizer.batch_decode(output_ids, skip_special_tokens=True)
-
+        outputs = self.tokenizer.batch_decode(outputs, skip_special_tokens=True)
 
         for i in range(len(outputs)):
             for s in stop:
                 if s in outputs[i]:
                     outputs[i] = outputs[i][:outputs[i].index(s)]
 
-        num_return_sequences = kwargs.get("num_return_sequences", 1)
         outputs = [{"id": i, "prompt": p, "outputs": outputs[i*num_return_sequences:(i+1)*num_return_sequences]} for i, p in enumerate(prompts)]
 
         return outputs
