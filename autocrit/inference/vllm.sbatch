@@ -1,14 +1,13 @@
 #!/bin/bash
 #SBATCH --job-name=vllm
 #SBATCH --partition=g80
-#SBATCH --account=carperai
+#SBATCH --account=stability
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --mem=0
 #SBATCH --cpus-per-task=64
-#SBATCH --output=%j
+#SBATCH --output=vllm_logs/%j
 #SBATCH --exclusive
-#SBATCH --exclude ip-26-0-158-175
 
 for ARGUMENT in "$@"
 do

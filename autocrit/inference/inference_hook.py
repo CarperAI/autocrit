@@ -10,6 +10,8 @@ import sys
 import time
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Tuple
+from tqdm import tqdm
+import openai
 
 import aiohttp
 import torch
@@ -110,7 +112,7 @@ class vLLMHook(InferenceHook):
             self.servers = [f"localhost:{8000+i}" for i in range(self.data_parallel_size)]
             self.processes = []
             for i in range(self.data_parallel_size):
-                cmd = f"python -m vllm.entrypoints.api_server -tp={tensor_parallel_size} --model={model_path} --port {8000+i}"
+                cmd = f"python -m vllm.entrypoints.api_server -tp={tensor_parallel_size} --model={model_path} --port {8000+i} --dtype bfloat16"
                 kwargs = {"env": {**os.environ, "CUDA_VISIBLE_DEVICES": devices[i], "TORCHELASTIC_USE_AGENT_STORE": ""}}
                 if not os.environ.get("DEBUG", False):
                     kwargs["stdout"] = subprocess.DEVNULL
@@ -135,7 +137,7 @@ class vLLMHook(InferenceHook):
         self.load_time = time.time() - self.init_time
         print(f"Loaded {model_path} in {self.load_time:.0f}s")
 
-    async def request_vllm_api(self, prompt: str, i=0, num_return_sequences=1, temperature=0.0, max_new_tokens=512, stop=[], server=None):
+    async def request_vllm_api(self, prompt: str, i=0, num_return_sequences=1, temperature=0.0, max_new_tokens=512, stop=[], server=None, **kwargs):
         pload = {
             "prompt": prompt,
             "n": num_return_sequences,
@@ -184,6 +186,50 @@ class vLLMHook(InferenceHook):
             print(f"Unloaded all {self.model_path} processes")
             self.processes = []
 
+def generate_openai(prompt, model_path="gpt-3.5-turbo", max_new_tokens=128, system_prompt="", temperature=1, stop=[], num_return_sequences=1, **kwargs):
+    MAX_API_RETRY = 5
+    for _ in range(MAX_API_RETRY):
+        try:
+            if model_path not in ['gpt-3.5-turbo', 'gpt-4']:
+                kwargs = {"deployment_id": model_path}
+            else:
+                kwargs = {"model": model_path, "stop": stop}
+
+            response = openai.ChatCompletion.create(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=temperature,
+                max_tokens=max_new_tokens,
+                n=num_return_sequences,
+                **kwargs,
+            )
+
+            return [response["choices"][ix]["message"]["content"] for ix in range(num_return_sequences)]
+
+        except Exception as e:
+            print(e)
+            time.sleep(10)
+
+    return [None]
+
+class OpenAIHook(InferenceHook):
+    def __init__(self, model_path: str):
+        self.model_path = model_path
+
+        if not os.environ.get("OPENAI_API_KEY") and openai.api_key is None:
+            raise RuntimeError("OPENAI_API_KEY is not set")
+
+    def generate(self, prompts: List[str], **kwargs) -> List[str]:
+        outputs = []
+        for prompt in tqdm(prompts, desc=f"Inferencing {self.model_path}"):
+            outputs.append(generate_openai(prompt, model_path=self.model_path, **kwargs))
+
+        return [{"id": i, "prompt": prompt, "outputs": outputs[i]} for i, prompt in enumerate(prompts)]
+
+    def free(self):
+        pass
 
 class RewardHook(InferenceHook):
     def __init__(self, model_path: str):
