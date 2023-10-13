@@ -112,7 +112,7 @@ class vLLMHook(InferenceHook):
             self.servers = [f"localhost:{8000+i}" for i in range(self.data_parallel_size)]
             self.processes = []
             for i in range(self.data_parallel_size):
-                cmd = f"python -m vllm.entrypoints.api_server -tp={tensor_parallel_size} --model={model_path} --port {8000+i} --dtype bfloat16"
+                cmd = f"python -m vllm.entrypoints.api_server -tp={tensor_parallel_size} --model={model_path} --port {8000+i}"
                 kwargs = {"env": {**os.environ, "CUDA_VISIBLE_DEVICES": devices[i], "TORCHELASTIC_USE_AGENT_STORE": ""}}
                 if not os.environ.get("DEBUG", False):
                     kwargs["stdout"] = subprocess.DEVNULL
@@ -137,7 +137,7 @@ class vLLMHook(InferenceHook):
         self.load_time = time.time() - self.init_time
         print(f"Loaded {model_path} in {self.load_time:.0f}s")
 
-    async def request_vllm_api(self, prompt: str, i=0, num_return_sequences=1, temperature=0.0, max_new_tokens=512, stop=[], server=None, **kwargs):
+    async def request_vllm_api(self, prompt: str, i=0, num_return_sequences=1, temperature=1.0, max_new_tokens=512, stop=[], server=None, **kwargs):
         pload = {
             "prompt": prompt,
             "n": num_return_sequences,
@@ -167,7 +167,7 @@ class vLLMHook(InferenceHook):
             outputs = [self.request_vllm_api(prompt=prompt, i=i, **kwargs) for i, prompt in enumerate(prompts)]
             return await tqdm_asyncio.gather(*outputs, desc=f"Inferencing {self.model_path}")
 
-        batch_size = 32768
+        batch_size = 16384
         outputs = []
         for i in range(0, len(prompts), batch_size):
             outputs += asyncio.run(generate_vllm_api(prompts[i:i+batch_size], **kwargs))

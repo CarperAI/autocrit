@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=vllm
-#SBATCH --partition=g80
+#SBATCH --partition=g40
 #SBATCH --account=stability
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
@@ -8,6 +8,8 @@
 #SBATCH --cpus-per-task=64
 #SBATCH --output=vllm_logs/%j
 #SBATCH --exclusive
+
+ray stop
 
 for ARGUMENT in "$@"
 do
